@@ -2527,10 +2527,18 @@ static void ExportTransactions(CWallet* const pwallet, const CWalletTx& wtx, con
                 {
                     if (wtx.GetDepthInMainChain() < 1)
                         csvRecord[TRANSACTION_CSV_FIELD_CATEGORY] = "orphan";
-                    else if (wtx.GetBlocksToMaturity() > 0)
-                        csvRecord[TRANSACTION_CSV_FIELD_CATEGORY] = "immature";
                     else
-                        csvRecord[TRANSACTION_CSV_FIELD_CATEGORY] = "generate";
+                    {
+                        int nBlocksToMaturity;
+                        {
+                            LOCK(cs_main);
+                            nBlocksToMaturity = wtx.GetBlocksToMaturity();
+                        }
+                        if (nBlocksToMaturity > 0)
+                            csvRecord[TRANSACTION_CSV_FIELD_CATEGORY] = "immature";
+                        else
+                            csvRecord[TRANSACTION_CSV_FIELD_CATEGORY] = "generate";
+                    }
                 }
                 else
                 {
@@ -4989,6 +4997,7 @@ UniValue generatecontinuous(const JSONRPCRequest& request)
         result.pushKV("threads", 0);
         result.pushKV("message", "Mining stopped");
     } else {
+        ClearHashSpeed();
         result.pushKV("threads", nThreads);
         if (sWarning.compare(""))
             result.pushKV("message", strprintf("Warning: %s", sWarning.c_str()));
