@@ -13,13 +13,13 @@
 #include <QPropertyAnimation>
 
 ModalOverlay::ModalOverlay(QWidget *parent, BitcoinGUI *btcGui) :
-QWidget(parent),
-gui(btcGui),
-ui(new Ui::ModalOverlay),
-bestHeaderHeight(0),
-bestHeaderDate(QDateTime()),
-layerIsVisible(false),
-userClosed(false)
+    QWidget(parent),
+    ui(new Ui::ModalOverlay),
+    gui(btcGui),
+    bestHeaderHeight(0),
+    bestHeaderDate(QDateTime()),
+    layerIsVisible(false),
+    userClosed(false)
 {
     ui->setupUi(this);
     connect(ui->closeButton, SIGNAL(clicked()), this, SLOT(closeClicked()));
@@ -212,4 +212,8 @@ void ModalOverlay::closeClicked()
 {
     showHide(true);
     userClosed = true;
+}
+
+void ModalOverlay::showEvent(QShowEvent *event){
+    resizeOp();
 }

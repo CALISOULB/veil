@@ -1,3 +1,4 @@
+// Copyright (c) 2019 Veil developers
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
@@ -11,6 +12,7 @@
 #include <primitives/block.h>
 #include <protocol.h>
 #include <libzerocoin/Params.h>
+#include <chain.h>
 
 #include <memory>
 #include <vector>
@@ -115,12 +117,17 @@ public:
     /** Zerocoin **/
     libzerocoin::ZerocoinParams* Zerocoin_Params() const;
     std::string Zerocoin_Modulus() const { return zerocoinModulus; }
-    int Zerocoin_MaxSpendsPerTransaction() const { return nMaxZerocoinSpendsPerTransaction; }
+    uint32_t Zerocoin_MaxSpendsPerTransaction() const { return nMaxZerocoinSpendsPerTransaction; }
     CAmount Zerocoin_MintFee() const { return nMinZerocoinMintFee; }
     int Zerocoin_MintRequiredConfirmations() const { return nMintRequiredConfirmations; }
     int Zerocoin_RequiredAccumulation() const { return nRequiredAccumulation; }
     int Zerocoin_DefaultSpendSecurity() const { return nDefaultSecurityLevel; }
     int Zerocoin_RequiredStakeDepth() const { return nZerocoinRequiredStakeDepth; }
+    int Zerocoin_RequiredStakeDepthV2() const { return nZerocoinRequiredStakeDepthV2; }
+    int Zerocoin_OverSpendAdjustment(libzerocoin::CoinDenomination denom) const;
+    CAmount ValueBlacklisted() const { return nValueBlacklist; }
+    uint32_t Zerocoin_PreferredMintsPerBlock() const { return nPreferredMintsPerBlock; }
+    int Zerocoin_PreferredMintsPerTransaction() const { return nPreferredMintsPerTx; }
 
     /** RingCT and Stealth **/
     int DefaultRingSize() const { return nDefaultRingSize; }
@@ -132,6 +139,31 @@ public:
     int CoinbaseMaturity() const { return nCoinbaseMaturity; }
     int HeightSupplyCreationStop() const { return nHeightSupplyCreationStop; }
     int ProofOfFullNodeRounds() const {return nProofOfFullNodeRounds; }
+    int EnforceWeightReductionTime() const { return nTimeEnforceWeightReduction; }
+    int HeightProtocolBumpEnforcement() const { return nHeightProtocolBumpEnforcement; }
+    int MaxHeaderRequestWithoutPoW() const { return nMaxHeaderRequestWithoutPoW; }
+    int BIP9Period() const { return consensus.nMinerConfirmationWindow; }
+    int HeightCheckDenom() const { return nHeightCheckDenom; }
+    int HeightLightZerocoin() const { return nHeightLightZerocoin; }
+    int HeightEnforceBlacklist() const { return nHeightEnforceBlacklist; }
+
+    uint32_t PowUpdateTimestamp() const { return nPowUpdateTimestamp; }
+    uint64_t KIforkTimestamp() const { return nTimeKIfork; }
+    uint64_t HeightKIenforce() const { return nHeightKIenforce; }
+
+    /**
+     * Returns the number of blocks to use for Dark Gravity Wave calculations
+    */
+    int64_t GetDwgPastBlocks(const CBlockIndex* pindex, const int nPowType, const bool fProofOfStake) const;
+
+    /**
+     * Returns the target spacing for the given algo
+     */
+    int64_t GetTargetSpacing(const CBlockIndex* pindex, const int nPoWType, const bool fProofOfStake) const;
+
+    bool CheckKIenforced(const CBlockIndex* pindex) const;
+    bool CheckKIenforced(int nSpendHeight) const;
+
 
 protected:
     CChainParams() {}
@@ -164,11 +196,14 @@ protected:
 
     // zerocoin
     std::string zerocoinModulus;
-    int nMaxZerocoinSpendsPerTransaction;
+    uint32_t nMaxZerocoinSpendsPerTransaction;
     CAmount nMinZerocoinMintFee;
     int nMintRequiredConfirmations;
     int nRequiredAccumulation;
     int nDefaultSecurityLevel;
+    CAmount nValueBlacklist;
+    uint32_t nPreferredMintsPerBlock;
+    int nPreferredMintsPerTx;
 
     //RingCT/Stealth
     int nDefaultRingSize;
@@ -176,12 +211,27 @@ protected:
     //Proof of Stake/Consensus
     int64_t nBudget_Fee_Confirmations;
     int nZerocoinRequiredStakeDepth;
+    int nZerocoinRequiredStakeDepthV2;
     int nHeightPoSStart;
     int nKernelModulus;
     int nLastPOWBlock;
     int nCoinbaseMaturity;
     int nProofOfFullNodeRounds;
     int nHeightSupplyCreationStop;
+
+    //Time and height enforcements
+    int nTimeEnforceWeightReduction;
+    int nHeightProtocolBumpEnforcement; // the height a new protobump is enforced
+    int nHeightCheckDenom;
+    int nHeightLightZerocoin;
+    int nHeightEnforceBlacklist;
+
+    //Settings that are not chain critical, but should not be edited unless the person changing understands the consequence
+    int nMaxHeaderRequestWithoutPoW;
+
+    uint32_t nPowUpdateTimestamp;
+    uint64_t nHeightKIenforce;
+    uint64_t nTimeKIfork;
 };
 
 /**

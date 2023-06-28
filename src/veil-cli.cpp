@@ -1,5 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -23,6 +24,7 @@
 #include <support/events.h>
 
 #include <univalue.h>
+#include <compat/stdin.h>
 
 static const char DEFAULT_RPCCONNECT[] = "127.0.0.1";
 static const int DEFAULT_HTTP_CLIENT_TIMEOUT=900;
@@ -33,6 +35,7 @@ static void SetupCliArgs()
 {
     const auto defaultBaseParams = CreateBaseChainParams(CBaseChainParams::MAIN);
     const auto testnetBaseParams = CreateBaseChainParams(CBaseChainParams::TESTNET);
+    const auto devnetBaseParams = CreateBaseChainParams(CBaseChainParams::DEVNET);
 
     gArgs.AddArg("-?", "This help message", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-version", "Print version and exit", false, OptionsCategory::OPTIONS);
@@ -45,12 +48,13 @@ static void SetupCliArgs()
     gArgs.AddArg("-rpcconnect=<ip>", strprintf("Send commands to node running on <ip> (default: %s)", DEFAULT_RPCCONNECT), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-rpccookiefile=<loc>", _("Location of the auth cookie. Relative paths will be prefixed by a net-specific datadir location. (default: data dir)"), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-rpcpassword=<pw>", "Password for JSON-RPC connections", false, OptionsCategory::OPTIONS);
-    gArgs.AddArg("-rpcport=<port>", strprintf("Connect to JSON-RPC on <port> (default: %u or testnet: %u)", defaultBaseParams->RPCPort(), testnetBaseParams->RPCPort()), false, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-rpcport=<port>", strprintf("Connect to JSON-RPC on <port> (default: %u, testnet: %u, devnet: %u)", defaultBaseParams->RPCPort(), testnetBaseParams->RPCPort(), devnetBaseParams->RPCPort()), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-rpcuser=<user>", "Username for JSON-RPC connections", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-rpcwait", "Wait for RPC server to start", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-rpcwallet=<walletname>", "Send RPC for non-default wallet on RPC server (needs to exactly match corresponding -wallet option passed to veild)", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-stdin", "Read extra arguments from standard input, one per line until EOF/Ctrl-D (recommended for sensitive information such as passphrases). When combined with -stdinrpcpass, the first line from standard input is used for the RPC password.", false, OptionsCategory::OPTIONS);
-    gArgs.AddArg("-stdinrpcpass", "Read RPC password from standard input as a single line. When combined with -stdin, the first line from standard input is used for the RPC password.", false, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-stdinrpcpass", "Read RPC password from standard input as a single line. When combined with -stdin, the first line from standard input is used for the RPC password. When combined with -stdinwalletpassphrase, -stdinrpcpass consumes the first line, and -stdinwalletpassphrase consumes the second.", false, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-stdinwalletpassphrase", "Read wallet passphrase from standard input as a single line. When combined with -stdin, the first line from standard input is used for the wallet passphrase.", false, OptionsCategory::OPTIONS);
 
     // Hidden
     gArgs.AddArg("-h", "", false, OptionsCategory::HIDDEN);
@@ -129,7 +133,7 @@ static int AppInitRPC(int argc, char* argv[])
         fprintf(stderr, "Error reading configuration file: %s\n", error.c_str());
         return EXIT_FAILURE;
     }
-    // Check for -testnet or -regtest parameter (BaseParams() calls are only valid after this clause)
+    // Check for -testnet, -regtest, or -devnet parameter (BaseParams() calls are only valid after this clause)
     try {
         SelectBaseParams(gArgs.GetChainName());
     } catch (const std::exception& e) {
@@ -262,11 +266,14 @@ public:
             result.pushKV("balance", batch[ID_WALLETINFO]["result"]["balance"]);
         }
         result.pushKV("blocks", batch[ID_BLOCKCHAININFO]["result"]["blocks"]);
+        result.pushKV("moneysupply", batch[ID_BLOCKCHAININFO]["result"]["moneysupply"]);
+        result.pushKV("zerocoinsupply", batch[ID_BLOCKCHAININFO]["result"]["zerocoinsupply"]);
         result.pushKV("timeoffset", batch[ID_NETWORKINFO]["result"]["timeoffset"]);
         result.pushKV("connections", batch[ID_NETWORKINFO]["result"]["connections"]);
         result.pushKV("proxy", batch[ID_NETWORKINFO]["result"]["networks"][0]["proxy"]);
         result.pushKV("difficulty", batch[ID_BLOCKCHAININFO]["result"]["difficulty"]);
         result.pushKV("testnet", UniValue(batch[ID_BLOCKCHAININFO]["result"]["chain"].get_str() == "test"));
+        result.pushKV("devnet", UniValue(batch[ID_BLOCKCHAININFO]["result"]["chain"].get_str() == "dev"));
         if (!batch[ID_WALLETINFO].isNull()) {
             result.pushKV("walletversion", batch[ID_WALLETINFO]["result"]["walletversion"]);
             result.pushKV("balance", batch[ID_WALLETINFO]["result"]["balance"]);
@@ -416,12 +423,34 @@ static int CommandLineRPC(int argc, char *argv[])
         }
         std::string rpcPass;
         if (gArgs.GetBoolArg("-stdinrpcpass", false)) {
+            NO_STDIN_ECHO();
+            if (!StdinReady()) {
+                fputs("RPC password> ", stderr);
+                fflush(stderr);
+            }
             if (!std::getline(std::cin, rpcPass)) {
                 throw std::runtime_error("-stdinrpcpass specified but failed to read from standard input");
             }
             gArgs.ForceSetArg("-rpcpassword", rpcPass);
+            fputs("\n", stderr);
         }
         std::vector<std::string> args = std::vector<std::string>(&argv[1], &argv[argc]);
+        if (gArgs.GetBoolArg("-stdinwalletpassphrase", false)) {
+            NO_STDIN_ECHO();
+            std::string walletPass;
+            if (args.size() < 1 || args[0].substr(0, 16) != "walletpassphrase") {
+                throw std::runtime_error("-stdinwalletpassphrase is only applicable for walletpassphrase(change)");
+            }
+            if (!StdinReady()) {
+                fputs("Wallet passphrase> ", stderr);
+                fflush(stderr);
+            }
+            if (!std::getline(std::cin, walletPass)) {
+                throw std::runtime_error("-stdinwalletpassphrase specified but failed to read from standard input");
+            }
+            args.insert(args.begin() + 1, walletPass);
+            fputs("\n", stderr);
+        }
         if (gArgs.GetBoolArg("-stdin", false)) {
             // Read one arg per line from stdin and append
             std::string line;

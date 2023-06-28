@@ -1,5 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -8,11 +9,11 @@
 #include <policy/policy.h>
 
 #include <consensus/validation.h>
-#include <validation.h>
 #include <coins.h>
 #include <tinyformat.h>
 #include <util.h>
 #include <utilstrencodings.h>
+#include <chainparams.h>
 
 
 CAmount GetDustThreshold(const CTxOut& txout, const CFeeRate& dustRelayFeeIn)
@@ -139,7 +140,7 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason)
     for (unsigned int i = 0; i < tx.vin.size(); i++)
     {
         const CTxIn& txin = tx.vin[i];
-        if (txin.scriptSig.IsZerocoinSpend()) {
+        if (txin.IsZerocoinSpend()) {
             if (!fZerocoinSpend && i > 0) {
                 reason = "malformed-zerocoinspend";
                 return false;
@@ -168,6 +169,7 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason)
 
     unsigned int nDataOut = 0;
     txnouttype whichType;
+    int nMintCount = 0;
     for (const auto &txout : tx.vpout) {
         const CTxOutBase *p = txout.get();
 
@@ -176,6 +178,13 @@ bool IsStandardTx(const CTransaction& tx, std::string& reason)
 
         if (!::IsStandard(*p->GetPScriptPubKey(), whichType)) {
             reason = "scriptpubkey";
+            return false;
+        }
+
+        if (txout->IsZerocoinMint())
+            nMintCount++;
+        if (nMintCount >= Params().Zerocoin_PreferredMintsPerTransaction()) {
+            reason = "zcmint_spam";
             return false;
         }
 
@@ -222,7 +231,7 @@ bool AreInputsStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
 
     for (unsigned int i = 0; i < tx.vin.size(); i++)
     {
-        if (tx.vin[i].scriptSig.IsZerocoinSpend() || tx.vin[i].IsAnonInput())
+        if (tx.vin[i].IsZerocoinSpend() || tx.vin[i].IsAnonInput())
             continue;
 
         const CTxOut& prev = mapInputs.AccessCoin(tx.vin[i].prevout).out;
@@ -267,15 +276,15 @@ bool IsWitnessStandard(const CTransaction& tx, const CCoinsViewCache& mapInputs)
         if (tx.vin[i].IsAnonInput())
         {
             size_t sizeWitnessStack = tx.vin[i].scriptWitness.stack.size();
-            if (sizeWitnessStack > 3)
+            if (sizeWitnessStack > maxStandardRingctStackItems())
                 return false;
             for (unsigned int j = 0; j < sizeWitnessStack; j++)
             {
-                if (tx.vin[i].scriptWitness.stack[j].size() > 4096) // TODO: max limits?
-                    return false;
-            };
+                if (tx.vin[i].scriptWitness.stack[j].size() > maxStandardRingctStackItemSize())
+                    return error("%s: witness is larger than max size", __func__);
+            }
             continue;
-        };
+        }
 
         const CTxOut &prev = mapInputs.AccessCoin(tx.vin[i].prevout).out;
 

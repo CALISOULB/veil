@@ -144,17 +144,17 @@ static bool rest_headers(HTTPRequest* req,
     if (!ParseHashStr(hashStr, hash))
         return RESTERR(req, HTTP_BAD_REQUEST, "Invalid hash: " + hashStr);
 
+    const CBlockIndex* tip = nullptr;
     std::vector<const CBlockIndex *> headers;
     headers.reserve(count);
-    {
-        LOCK(cs_main);
-        const CBlockIndex* pindex = LookupBlockIndex(hash);
-        while (pindex != nullptr && chainActive.Contains(pindex)) {
-            headers.push_back(pindex);
-            if (headers.size() == (unsigned long)count)
-                break;
-            pindex = chainActive.Next(pindex);
-        }
+
+    tip = chainActive.Tip();
+    const CBlockIndex* pindex = LookupBlockIndex(hash);
+    while (pindex != nullptr && chainActive.Contains(pindex)) {
+        headers.push_back(pindex);
+        if (headers.size() == (unsigned long)count)
+            break;
+        pindex = chainActive.Next(pindex);
     }
 
     CDataStream ssHeader(SER_NETWORK, PROTOCOL_VERSION);
@@ -179,9 +179,8 @@ static bool rest_headers(HTTPRequest* req,
     case RetFormat::JSON: {
         UniValue jsonHeaders(UniValue::VARR);
         {
-            LOCK(cs_main);
             for (const CBlockIndex *pindex : headers) {
-                jsonHeaders.push_back(blockheaderToJSON(pindex));
+                jsonHeaders.push_back(blockheaderToJSON(tip, pindex));
             }
         }
         std::string strJSON = jsonHeaders.write() + "\n";
@@ -209,20 +208,17 @@ static bool rest_block(HTTPRequest* req,
         return RESTERR(req, HTTP_BAD_REQUEST, "Invalid hash: " + hashStr);
 
     CBlock block;
-    CBlockIndex* pblockindex = nullptr;
-    {
-        LOCK(cs_main);
-        pblockindex = LookupBlockIndex(hash);
-        if (!pblockindex) {
-            return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
-        }
-
-        if (IsBlockPruned(pblockindex))
-            return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not available (pruned data)");
-
-        if (!ReadBlockFromDisk(block, pblockindex, Params().GetConsensus()))
-            return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
+    CBlockIndex* tip = chainActive.Tip();
+    CBlockIndex* pblockindex = LookupBlockIndex(hash);
+    if (!pblockindex) {
+        return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
     }
+
+    if (IsBlockPruned(pblockindex))
+        return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not available (pruned data)");
+
+    if (!ReadBlockFromDisk(block, pblockindex, Params().GetConsensus()))
+        return RESTERR(req, HTTP_NOT_FOUND, hashStr + " not found");
 
     CDataStream ssBlock(SER_NETWORK, PROTOCOL_VERSION | RPCSerializationFlags());
     ssBlock << block;
@@ -243,11 +239,7 @@ static bool rest_block(HTTPRequest* req,
     }
 
     case RetFormat::JSON: {
-        UniValue objBlock;
-        {
-            LOCK(cs_main);
-            objBlock = blockToJSON(block, pblockindex, showTxDetails);
-        }
+        UniValue objBlock = blockToJSON(block, tip, pblockindex, showTxDetails);
         std::string strJSON = objBlock.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
         req->WriteReply(HTTP_OK, strJSON);
@@ -380,7 +372,7 @@ static bool rest_tx(HTTPRequest* req, const std::string& strURIPart)
 
     case RetFormat::JSON: {
         UniValue objTx(UniValue::VOBJ);
-        TxToUniv(*tx, hashBlock, objTx);
+        TxToUniv(*tx, hashBlock, {{}}, objTx);
         std::string strJSON = objTx.write() + "\n";
         req->WriteHeader("Content-Type", "application/json");
         req->WriteReply(HTTP_OK, strJSON);

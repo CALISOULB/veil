@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/receivewidget.h>
 #include <qt/veil/forms/ui_receivewidget.h>
 
@@ -27,8 +31,8 @@
 
 ReceiveWidget::ReceiveWidget(QWidget *parent, WalletView* walletView) :
     QWidget(parent),
-    mainWindow(walletView),
-    ui(new Ui::ReceiveWidget)
+    ui(new Ui::ReceiveWidget),
+    mainWindow(walletView)
 {
     ui->setupUi(this);
     ui->title->setProperty("cssClass" , "title");
@@ -63,12 +67,12 @@ ReceiveWidget::ReceiveWidget(QWidget *parent, WalletView* walletView) :
 
     ui->labelAddress->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
 
-    connect(ui->btnCopy, SIGNAL(clicked()), this, SLOT(on_btnCopyAddress_clicked()));
+    connect(ui->btnCopy, SIGNAL(clicked()), this, SLOT(onBtnCopyAddressClicked()));
     connect(ui->btnCreate, SIGNAL(clicked()), this, SLOT(generateNewAddressClicked()));
 
 }
 
-void ReceiveWidget::on_btnCopyAddress_clicked() {
+void ReceiveWidget::onBtnCopyAddressClicked() {
     if(!qAddress.isEmpty()) {
         GUIUtil::setClipboard(qAddress);
         openToastDialog("Address copied", mainWindow->getGUI());
@@ -77,40 +81,49 @@ void ReceiveWidget::on_btnCopyAddress_clicked() {
 }
 
 void ReceiveWidget::generateNewAddressClicked(){
-    if(generateNewAddress()) openToastDialog("Address generated", mainWindow->getGUI());
+    if(generateNewAddress(true)) openToastDialog("Address generated", mainWindow->getGUI());
     else openToastDialog("Wallet Encrypted, please unlock it first", mainWindow->getGUI());
 }
 
-bool ReceiveWidget::generateNewAddress(){
+bool ReceiveWidget::generateNewAddress(bool isOnDemand){
     // Address
     interfaces::Wallet& wallet = walletModel->wallet();
 
-    bool isLocked = walletModel->getEncryptionStatus() == WalletModel::Locked;
     std::string strAddress;
-    std::vector<interfaces::WalletAddress> addresses = wallet.getLabelAddress("stealth");
-    if(isLocked || !addresses.empty()) {
-        interfaces::WalletAddress address = addresses[0];
-        if (address.dest.type() == typeid(CStealthAddress)){
+    std::string addressName = " ";
+    isminetype isMine = ISMINE_NO;
+    std::string purpose = " ";
+
+    if (!isOnDemand && displayAddressSet) {
+        bool doesAddyExist = wallet.getAddress(currentDisplayAddress, &addressName, &isMine, &purpose);
+        strAddress = EncodeDestination(currentDisplayAddress, !("receive_miner" == purpose));
+    } else {
+        std::vector<interfaces::WalletAddress> addresses = wallet.getLabelAddress("stealth");
+        if(!isOnDemand && !addresses.empty()) {
+            interfaces::WalletAddress address = addresses[0];
+            if (address.dest.type() == typeid(CStealthAddress)){
+                bool fBech32 = true;
+                strAddress = EncodeDestination(address.dest,true);
+            }
+        }else {
+            // Generate a new address to associate with given label
+            CStealthAddress address;
+            if (!wallet.getNewStealthAddress(address)) {
+                openToastDialog("Wallet Encrypted, please unlock it first", mainWindow->getGUI());
+                return false;
+            }
             bool fBech32 = true;
-            strAddress = EncodeDestination(address.dest,true);
+            strAddress = address.ToString(fBech32);
+            // Store it
+            wallet.setAddressBook(DecodeDestination(strAddress), "", "receive", true);
         }
-    }else {
-        // Generate a new address to associate with given label
-        CStealthAddress address;
-        if (!wallet.getNewStealthAddress(address)) {
-            openToastDialog("Wallet Encrypted, please unlock it first", mainWindow->getGUI());
-            return false;
-        }
-        bool fBech32 = true;
-        strAddress = address.ToString(fBech32);
-        // Store it
-        wallet.setAddressBook(DecodeDestination(strAddress), "", "receive", true);
     }
 
     qAddress =  QString::fromStdString(strAddress);
 
     // set address
     ui->labelAddress->setText(qAddress.left(16) + "..." + qAddress.right(16));
+    ui->labelAddressName->setText(QString::fromStdString(addressName));
 
     SendCoinsRecipient info;
     info.address = qAddress;
@@ -200,7 +213,6 @@ void ReceiveWidget::hideEvent(QHideEvent *event){
     a->setEndValue(0);
     a->setEasingCurve(QEasingCurve::OutBack);
     a->start(QPropertyAnimation::DeleteWhenStopped);
-    connect(a,SIGNAL(finished()),this,SLOT(hideThisWidget()));
 }
 
 ReceiveWidget::~ReceiveWidget()
@@ -212,4 +224,10 @@ void ReceiveWidget::refreshWalletStatus() {
     // Label Address
     // TODO: Use latest address instead of generate one every time.
     generateNewAddress();
+}
+
+void ReceiveWidget::setDisplayRcvAddress(CTxDestination *displayAddress) {
+    displayAddressSet = true;
+    currentDisplayAddress = *displayAddress;
+    generateNewAddress(false);   
 }

@@ -11,6 +11,8 @@
 #include <key_io.h>
 #include <wallet/wallet.h>
 
+#include <algorithm>
+
 #include <QFont>
 #include <QDebug>
 
@@ -58,7 +60,7 @@ static AddressTableEntry::Type translateTransactionType(const QString &strPurpos
     // "refund" addresses aren't shown, and change addresses aren't in mapAddressBook at all.
     if (strPurpose == "send")
         addressType = AddressTableEntry::Sending;
-    else if (strPurpose == "receive" || strPurpose == "basecoin" || strPurpose == "stealth_receive")
+    else if (strPurpose == "receive" || strPurpose == "receive_miner" || strPurpose == "basecoin" || strPurpose == "stealth_receive")
         addressType = AddressTableEntry::Receiving;
     else if (strPurpose == "unknown" || strPurpose == "") // if purpose not set, guess
         addressType = (isMine ? AddressTableEntry::Receiving : AddressTableEntry::Sending);
@@ -83,7 +85,7 @@ public:
             {
                 AddressTableEntry::Type addressType = translateTransactionType(
                         QString::fromStdString(address.purpose), address.is_mine);
-                bool fBasecoin = address.purpose == "basecoin";
+                bool fBasecoin = address.purpose == "receive_miner";
                 QString addressStr = QString::fromStdString(EncodeDestination(address.dest, !fBasecoin));
                 if (addressStr.isEmpty()){
                     // TODO: Check why this is happening.
@@ -94,18 +96,18 @@ public:
                                   QString::fromStdString(address.name), addressStr, fBasecoin));
             }
         }
-        // qLowerBound() and qUpperBound() require our cachedAddressTable list to be sorted in asc order
+        // std::lower_bound() and std::upper_bound() require our cachedAddressTable list to be sorted in asc order
         // Even though the map is already sorted this re-sorting step is needed because the originating map
         // is sorted by binary address, not by base58() address.
-        qSort(cachedAddressTable.begin(), cachedAddressTable.end(), AddressTableEntryLessThan());
+        std::sort(cachedAddressTable.begin(), cachedAddressTable.end(), AddressTableEntryLessThan());
     }
 
     void updateEntry(const QString &address, const QString &label, bool isMine, const QString &purpose, int status)
     {
         // Find address / label in model
-        QList<AddressTableEntry>::iterator lower = qLowerBound(
+        QList<AddressTableEntry>::iterator lower = std::lower_bound(
             cachedAddressTable.begin(), cachedAddressTable.end(), address, AddressTableEntryLessThan());
-        QList<AddressTableEntry>::iterator upper = qUpperBound(
+        QList<AddressTableEntry>::iterator upper = std::upper_bound(
             cachedAddressTable.begin(), cachedAddressTable.end(), address, AddressTableEntryLessThan());
         int lowerIndex = (lower - cachedAddressTable.begin());
         int upperIndex = (upper - cachedAddressTable.begin());
@@ -215,6 +217,8 @@ QVariant AddressTableModel::data(const QModelIndex &index, int role) const
             return rec->address;
         case Address_dot:
             return rec->address.left(18) + "..." + rec->address.right(18);
+        case Is_Basecoin:
+            return rec->fBasecoin;
         }
     }
     else if (role == Qt::FontRole)
@@ -245,6 +249,7 @@ bool AddressTableModel::setData(const QModelIndex &index, const QVariant &value,
     if(!index.isValid())
         return false;
     AddressTableEntry *rec = static_cast<AddressTableEntry*>(index.internalPointer());
+
     std::string strPurpose = (rec->type == AddressTableEntry::Sending ? "send" : "receive");
     editStatus = OK;
 

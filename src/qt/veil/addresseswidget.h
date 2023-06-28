@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef ADDRESSESWIDGET_H
 #define ADDRESSESWIDGET_H
 
@@ -46,6 +50,9 @@ public:
 
     void refreshWalletStatus();
 
+Q_SIGNALS:
+    void rcvAddressSelected(CTxDestination *address);
+
 private Q_SLOTS:
     void onMyAddressClicked();
     void onContactsClicked();
@@ -72,7 +79,7 @@ private:
     bool isOnMyAddresses;
 
     void initAddressesView();
-    virtual void resizeEvent(QResizeEvent* event);
+    virtual void resizeEvent(QResizeEvent* event) override;
     void reloadTab(bool _isOnMyAddresses);
     void showList(bool show);
 

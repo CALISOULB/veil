@@ -31,6 +31,7 @@
 class CCoinControl;
 class CFeeRate;
 class CKey;
+class CReserveKey;
 class CTempRecipient;
 class CWallet;
 class CWalletTx;
@@ -103,15 +104,26 @@ public:
     //! Get private key.
     virtual bool getPrivKey(const CKeyID& address, CKey& key) = 0;
 
+    //! Get secret key of stealth address
+    virtual bool getPrivKey(CStealthAddress& address, CKey& key) = 0;
+
     //! Return whether wallet has private key.
     virtual bool isSpendable(const CTxDestination& dest) = 0;
 
     virtual std::string mintZerocoin(CAmount nValue, std::vector<CDeterministicMint>& vDMints, OutputTypes inputtype,
             const CCoinControl* coinControl) = 0;
 
-    virtual std::unique_ptr<PendingWalletTx> spendZerocoin(CAmount nValue, int nSecurityLevel, CZerocoinSpendReceipt& receipt,
-            std::vector<CZerocoinMint>& vMintsSelected, bool fMintChange, bool fMinimizeChange,
-            CTxDestination* addressTo = NULL) = 0;
+    virtual bool getMint(const uint256& serialHash, CZerocoinMint& mint) = 0;
+
+    virtual std::unique_ptr<PendingWalletTx> prepareZerocoinSpend(CAmount nValue, int nSecurityLevel,
+            CZerocoinSpendReceipt& receipt, std::vector<CZerocoinMint>& vMintsSelected, bool fMintChange,
+            bool fMinimizeChange, std::vector<std::tuple<CWalletTx, std::vector<CDeterministicMint>,
+                    std::vector<CZerocoinMint>>>& vCommitData,
+                    libzerocoin::CoinDenomination denomFilter = libzerocoin::CoinDenomination::ZQ_ERROR,
+                    CTxDestination* addressTo = NULL) = 0;
+
+    virtual bool commitZerocoinSpend(CZerocoinSpendReceipt& receipt, std::vector<std::tuple<CWalletTx,
+            std::vector<CDeterministicMint>, std::vector<CZerocoinMint>>>& vCommitData, int computeTime) = 0;
 
     //! Return whether wallet has watch only keys.
     virtual bool haveWatchOnly() = 0;
@@ -231,6 +243,7 @@ public:
     virtual CAmount getAvailableBalance(const CCoinControl& coin_control) = 0;
     virtual CAmount getAvailableCTBalance(const CCoinControl& coin_control) { return 0; }
     virtual CAmount getAvailableRingCTBalance(const CCoinControl& coin_control) { return 0; }
+    virtual CAmount getAvailableZerocoinBalance(const CCoinControl& coin_control) = 0;
 
     //! Create a WalletTx without all the data filled in yet.
     virtual CWallet* getWalletPointer() { return nullptr; }
@@ -399,22 +412,23 @@ struct WalletTx
     std::vector<isminetype> txout_is_mine;
     std::vector<CTxDestination> txout_address;
     std::vector<isminetype> txout_address_is_mine;
-    CAmount credit;
-    CAmount debit;
-    CAmount change;
+    CAmount credit = 0;
+    CAmount debit = 0;
+    CAmount change = 0;
     int64_t time;
     std::map<std::string, std::string> value_map;
-    bool is_coinbase;
-    bool is_coinstake;
-    bool is_my_zerocoin_mint;
-    bool is_my_zerocoin_spend;
-    bool is_anon_send;
-    bool is_anon_recv;
+    bool is_coinbase = false;
+    bool is_coinstake = false;
+    bool is_my_zerocoin_mint = false;
+    bool is_my_zerocoin_spend = false;
+    bool is_anon_send = false;
+    bool is_anon_recv = false;
     bool has_rtx;
     std::map<unsigned int, CAmount> map_anon_value_out;
     std::map<unsigned int, CAmount> map_anon_value_in;
     std::pair<int, CAmount> ct_fee;
     CTransactionRecord rtx;
+    int64_t computetime;
 };
 
 //! Updated transaction status.

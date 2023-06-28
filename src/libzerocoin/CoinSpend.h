@@ -19,6 +19,7 @@
 #include "Coin.h"
 #include "Commitment.h"
 #include "Params.h"
+#include "PubcoinSignature.h"
 #include "SerialNumberSignatureOfKnowledge.h"
 #include "SpendType.h"
 
@@ -39,15 +40,17 @@ class CoinSpend
 public:
 
     static int const V3_SMALL_SOK = 3;
+    static int const V4_LIMP = 4;
 
     //! \param paramsV1 - if this is a V1 zerocoin, then use params that existed with initial modulus, ignored otherwise
-    //! \param paramsV2 - params that begin when V2 zerocoins begin on the PIVX network
+    //! \param paramsV2 - params that begin when V2 zerocoins begin on the VEIL network
     //! \param strm - a serialized CoinSpend
     template <typename Stream>
     CoinSpend(const ZerocoinParams* params, Stream& strm) :
         accumulatorPoK(&params->accumulatorParams),
         smallSoK(params),
-        commitmentPoK(&params->serialNumberSoKCommitmentGroup, &params->accumulatorParams.accumulatorPoKCommitmentGroup)
+        commitmentPoK(&params->serialNumberSoKCommitmentGroup, &params->accumulatorParams.accumulatorPoKCommitmentGroup),
+        pubcoinSig(params)
     {
         strm >> *this;
     }
@@ -76,7 +79,7 @@ public:
 	 * @throw ZerocoinException if the process fails
 	 */
     CoinSpend(const ZerocoinParams* params, const PrivateCoin& coin, Accumulator& a, const uint256& checksum,
-              const AccumulatorWitness& witness, const uint256& ptxHash, const SpendType& spendType, const uint8_t version = (uint8_t) V3_SMALL_SOK);
+              const AccumulatorWitness& witness, const uint256& ptxHash, const SpendType& spendType, const uint8_t version = (uint8_t) V3_SMALL_SOK, bool fLightZerocoin = false, const uint256& txidMintFrom = uint256(), int nOutputPos = -1);
 
     bool operator<(const CoinSpend& rhs) const { return this->getCoinSerialNumber() < rhs.getCoinSerialNumber(); }
 
@@ -103,13 +106,16 @@ public:
 	 * @return the txout hash
 	 */
     uint256 getTxOutHash() const { return ptxHash; }
+    uint256 getS1Size() const { return commitmentPoK.GetS1Size(); }
     CBigNum getAccCommitment() const { return accCommitmentToCoinValue; }
     CBigNum getSerialComm() const { return serialCommitmentToCoinValue; }
     SerialNumberSoK_small getSmallSoK() const { return smallSoK; }
     uint8_t getVersion() const { return version; }
+    CBigNum getPubcoinValue() const;
     CPubKey getPubKey() const { return pubkey; }
     SpendType getSpendType() const { return spendType; }
     std::vector<unsigned char> getSignature() const { return vchSig; }
+    const PubcoinSignature& getPubcoinSignature() const { return pubcoinSig; }
     uint256 getHashSig() {
         if (hashSig.IsNull()){
             hashSig = signatureHash();
@@ -117,7 +123,7 @@ public:
         return hashSig;
     }
 
-    bool Verify(const Accumulator& a, std::string& strError, bool verifySoK = true) const;
+    bool Verify(const Accumulator& a, std::string& strError, const CBigNum& bnPubcoin, bool verifySoK, bool verifyPubcoin, bool verifyZKP) const;
     bool HasValidSerial(ZerocoinParams* params) const;
     bool HasValidSignature() const;
     std::string ToString() const;
@@ -139,6 +145,9 @@ public:
         READWRITE(accumulatorPoK);
         READWRITE(smallSoK);
         READWRITE(commitmentPoK);
+        if (version == V4_LIMP) {
+            READWRITE(pubcoinSig);
+        }
     }
 
 private:
@@ -161,6 +170,9 @@ private:
 
     // Cached hashSig
     uint256 hashSig;
+
+    // Version 4 "Limp Mode"
+    PubcoinSignature pubcoinSig;
 };
 
 } /* namespace libzerocoin */

@@ -1,10 +1,12 @@
 // Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2018-2021 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <core_io.h>
 
 #include <veil/ringct/blind.h>
+#include <veil/zerocoin/zchain.h>
 #include <consensus/consensus.h>
 #include <consensus/validation.h>
 #include <key_io.h>
@@ -155,16 +157,21 @@ void AddRangeproof(const std::vector<uint8_t> &vRangeproof, UniValue &entry)
 }
 
 void OutputToJSON(uint256 &txid, int i,
-                  const CTxOutBase *baseOut, UniValue &entry)
+                  const CTxOutBase *baseOut, UniValue &entry, bool isCoinBase = false)
 {
     switch (baseOut->GetType())
     {
         case OUTPUT_STANDARD:
         {
-            entry.pushKV("type", "standard");
+            if (isCoinBase && i == 0) {
+                entry.pushKV("type", "coinbase");
+            } else {
+                entry.pushKV("type", "standard");
+            }
             CTxOutStandard *s = (CTxOutStandard*) baseOut;
             entry.pushKV("value", ValueFromAmount(s->nValue));
             entry.pushKV("valueSat", s->nValue);
+            entry.pushKV("vout.n", i);
             UniValue o(UniValue::VOBJ);
             ScriptPubKeyToUniv(s->scriptPubKey, o, true);
             entry.pushKV("scriptPubKey", o);
@@ -175,6 +182,7 @@ void OutputToJSON(uint256 &txid, int i,
             CTxOutData *s = (CTxOutData*) baseOut;
             entry.pushKV("type", "data");
             entry.pushKV("data_hex", HexStr(s->vData.begin(), s->vData.end()));
+            entry.pushKV("vout.n", i);
             CAmount nValue;
             if (s->GetCTFee(nValue))
                 entry.pushKV("ct_fee", ValueFromAmount(nValue));
@@ -185,6 +193,7 @@ void OutputToJSON(uint256 &txid, int i,
             CTxOutCT *s = (CTxOutCT*) baseOut;
             entry.pushKV("type", "blind");
             entry.pushKV("valueCommitment", HexStr(&s->commitment.data[0], &s->commitment.data[0]+33));
+            entry.pushKV("vout.n", i);
             UniValue o(UniValue::VOBJ);
             ScriptPubKeyToUniv(s->scriptPubKey, o, true);
             entry.pushKV("scriptPubKey", o);
@@ -197,7 +206,14 @@ void OutputToJSON(uint256 &txid, int i,
         {
             CTxOutRingCT *s = (CTxOutRingCT*) baseOut;
             entry.pushKV("type", "ringct");
+            entry.pushKV("vout.n", i);
             entry.pushKV("pubkey", HexStr(s->pk.begin(), s->pk.end()));
+
+            std::vector<uint8_t> objKeyImage;
+            objKeyImage.resize(33);
+            memcpy(&objKeyImage[0], &s->pk[0], 33);
+            entry.pushKV("key_image", HexStr(objKeyImage));
+
             entry.pushKV("valueCommitment", HexStr(&s->commitment.data[0], &s->commitment.data[0]+33));
             entry.pushKV("data_hex", HexStr(s->vData.begin(), s->vData.end()));
 
@@ -252,7 +268,7 @@ void ScriptPubKeyToUniv(const CScript& scriptPubKey,
     out.pushKV("addresses", a);
 }
 
-void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry, bool include_hex, int serialize_flags)
+void TxToUniv(const CTransaction& tx, const uint256& hashBlock, const std::vector<std::vector<COutPoint>>& vTxRingCtInputs, UniValue& entry, bool include_hex, int serialize_flags)
 {
     entry.pushKV("txid", tx.GetHash().GetHex());
     entry.pushKV("hash", tx.GetWitnessHash().GetHex());
@@ -274,11 +290,44 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry,
             txin.GetAnonInfo(nSigInputs, nSigRingSize);
             in.pushKV("num_inputs", (int) nSigInputs);
             in.pushKV("ring_size", (int) nSigRingSize);
+
+            //Add ring ct inputs
+            if (vTxRingCtInputs.size() > i) {
+                std::vector<COutPoint> vRingCtInputs = vTxRingCtInputs[i];
+                UniValue arrRing(UniValue::VARR);
+                for (const COutPoint& outpoint : vRingCtInputs) {
+                    UniValue obj(UniValue::VOBJ);
+                    obj.pushKV("txid", outpoint.hash.GetHex());
+                    obj.pushKV("vout.n", (uint64_t) outpoint.n);
+                    arrRing.push_back(obj);
+                }
+                in.pushKV("ringct_inputs", arrRing);
+                const std::vector<uint8_t> vKeyImages = txin.scriptData.stack[0];
+                uint32_t nInputs, nRingSize;
+                txin.GetAnonInfo(nInputs, nRingSize);
+
+                UniValue arrKeyImages(UniValue::VARR);
+                for (unsigned int k = 0; k < nSigInputs; k++) {
+                    const CCmpPubKey &ki = *((CCmpPubKey*)&vKeyImages[k*nSigInputs]);
+                    UniValue objKeyImage(UniValue::VOBJ);
+                    objKeyImage.pushKV(std::to_string(k), HexStr(ki));
+                    arrKeyImages.push_back(objKeyImage);
+                }
+                in.pushKV("key_images", arrKeyImages);
+            }
         } else {
             in.pushKV("txid", txin.prevout.hash.GetHex());
-            if (txin.scriptSig.IsZerocoinSpend()) {
+            if (txin.IsZerocoinSpend()) {
                 in.pushKV("type", "zerocoinspend");
                 in.pushKV("denomination", FormatMoney(txin.GetZerocoinSpent()));
+                std::vector<char, zero_after_free_allocator<char> > dataTxIn;
+                dataTxIn.insert(dataTxIn.end(), txin.scriptSig.begin() + 4, txin.scriptSig.end());
+                CDataStream serializedCoinSpend(dataTxIn, SER_NETWORK, PROTOCOL_VERSION);
+                libzerocoin::CoinSpend spend(Params().Zerocoin_Params(), serializedCoinSpend);
+                in.pushKV("serial", spend.getCoinSerialNumber().GetHex());
+                if (spend.getVersion() >= 4) {
+                    in.pushKV("pubcoin", spend.getPubcoinValue().GetHex());
+                }
             }
             in.pushKV("vout", (int64_t)txin.prevout.n);
             UniValue o(UniValue::VOBJ);
@@ -303,7 +352,7 @@ void TxToUniv(const CTransaction& tx, const uint256& hashBlock, UniValue& entry,
     for (unsigned int i = 0; i < tx.vpout.size(); i++) {
         const auto& pout = tx.vpout[i];
         UniValue out(UniValue::VOBJ);
-        OutputToJSON(txid, i, pout.get(), out);
+        OutputToJSON(txid, i, pout.get(), out, tx.IsCoinBase());
         vout.push_back(out);
     }
 

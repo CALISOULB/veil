@@ -1,9 +1,12 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/addresseswidget.h>
-//#include "addressesmodel.h"
 #include <qt/veil/forms/ui_addresseswidget.h>
 
 #include <qt/veil/addressreceive.h>
-#include <qt/addresstablemodel.cpp>
+#include <qt/addresstablemodel.h>
 #include <qt/bitcoinunits.h>
 #include <qt/clientmodel.h>
 #include <qt/guiconstants.h>
@@ -11,6 +14,7 @@
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
 #include <qt/walletmodel.h>
+
 #include <QDebug>
 #include <QGraphicsOpacityEffect>
 #include <QStyledItemDelegate>
@@ -20,10 +24,13 @@
 #include <QPainter>
 #include <QAbstractItemDelegate>
 #include <QPropertyAnimation>
-#include <iostream>
 #include <QPoint>
 #include <QMenu>
 #include <QSortFilterProxyModel>
+
+#include <iostream>
+
+#include <key_io.h>
 
 #define DECORATION_SIZE 54
 #define NUM_ITEMS 5
@@ -33,8 +40,12 @@ class AddressViewDelegate : public QAbstractItemDelegate
     Q_OBJECT
 public:
     explicit AddressViewDelegate(const PlatformStyle *_platformStyle, QObject *parent=nullptr, AddressTableModel *_model = nullptr):
-        QAbstractItemDelegate(parent), unit(BitcoinUnits::VEIL), model(_model),
-        platformStyle(_platformStyle) {}
+        QAbstractItemDelegate(parent),
+	unit(BitcoinUnits::VEIL),
+        platformStyle(_platformStyle),
+	model(_model)
+	{
+	}
 
     inline void paint(QPainter *painter, const QStyleOptionViewItem &option,
                       const QModelIndex &index ) const {
@@ -81,12 +92,7 @@ public:
             amountRect.setRight(amountRect.right() - 42);
         } else{
             foreground = option.palette.color(QPalette::Text);
-        }
-
-        painter->setPen(foreground);        
-
-        QRect boundingRect;
-        painter->drawText(addressRect, Qt::AlignLeft|Qt::AlignVCenter, address, &boundingRect);
+        }             
 
         // Text size.
         QFont fontTemp = painter->font();
@@ -99,7 +105,10 @@ public:
             painter->setFont(font);
         }
 
-        painter->setPen(foreground);
+        painter->setPen(foreground);   
+
+        QRect boundingRect;
+        painter->drawText(addressRect, Qt::AlignLeft|Qt::AlignVCenter, address, &boundingRect);
 
         amountRect.setRight(amountRect.right() - 16);
         painter->drawText(amountRect, Qt::AlignRight|Qt::AlignVCenter, addressData);
@@ -209,8 +218,13 @@ AddressesWidget::AddressesWidget(const PlatformStyle *platformStyle, WalletView 
     connect(ui->btnContacts,SIGNAL(clicked()),this,SLOT(onContactsClicked()));
     connect(ui->btnAdd,SIGNAL(clicked()),this,SLOT(onNewAddressClicked()));
     connect(ui->btnAddIcon,SIGNAL(clicked()),this,SLOT(onNewAddressClicked()));
-    connect(ui->btnMiningAddress,SIGNAL(clicked()),this,SLOT(onNewMinerAddressClicked()));
-    connect(ui->btnMiningAddress2,SIGNAL(clicked()),this,SLOT(onNewMinerAddressClicked()));
+
+    ui->btnMiningAddress->setVisible(false);
+    ui->btnMiningAddress2->setVisible(false);
+    ui->lblSplit->setVisible(false);
+    //connect(ui->btnMiningAddress,SIGNAL(clicked()),this,SLOT(onNewMinerAddressClicked()));
+    //connect(ui->btnMiningAddress2,SIGNAL(clicked()),this,SLOT(onNewMinerAddressClicked()));
+
 }
 
 void AddressesWidget::setWalletModel(WalletModel *model)
@@ -229,6 +243,11 @@ void AddressesWidget::handleAddressClicked(const QModelIndex &index){
         listView = ui->listAddresses;
         type = AddressTableModel::Receive;
         updatedIndex = proxyModel->mapToSource(index);
+        auto address = this->model->index(updatedIndex.row(), AddressTableModel::Address, updatedIndex);
+        QString addressStr = this->model->data(address, Qt::DisplayRole).toString();
+        CTxDestination selectedAddress = DecodeDestination(addressStr.toStdString());
+
+        Q_EMIT rcvAddressSelected(&selectedAddress);
     }else{
         listView = ui->listContacts;
         type = AddressTableModel::Send;
@@ -237,18 +256,25 @@ void AddressesWidget::handleAddressClicked(const QModelIndex &index){
 
     listView->setCurrentIndex(updatedIndex);
     QRect rect = listView->visualRect(index);
-    QPoint pos = rect.topRight();
-    pos.setX(pos.x() - (DECORATION_SIZE * 2));
-    pos.setY(pos.y() + (DECORATION_SIZE));
+
     const QString constType = type;
-    if(!this->menu) this->menu = new AddressesMenu(constType , updatedIndex, this, this->mainWindow, this->model);
+    if(!this->menu) this->menu = new AddressesMenu(constType , updatedIndex, mainWindow->getGUI(), this->mainWindow, this->model);
     else {
-        this->menu->hide();
         this->menu->setInitData(updatedIndex, this->model, constType);
     }
+
+    QPoint pos = mainWindow->getGUI()->mapFromGlobal(QCursor::pos());
+
+	if(pos.x()+menu->width()>mainWindow->getGUI()->width()){
+		pos.setX(pos.x() - menu->width());
+	}
+	if(pos.y()+menu->height()>mainWindow->getGUI()->height()){
+		pos.setY(pos.y() - menu->height());
+	}
+
     menu->move(pos);
     menu->show();
-
+    menu->raise();
 }
 
 void AddressesWidget::initAddressesView(){
@@ -276,11 +302,6 @@ void AddressesWidget::hideEvent(QHideEvent *event){
     a->setEndValue(0);
     a->setEasingCurve(QEasingCurve::OutBack);
     a->start(QPropertyAnimation::DeleteWhenStopped);
-    connect(a,SIGNAL(finished()),this,SLOT(hideThisWidget()));
-
-    if(menu != nullptr){
-        menu->hide();
-    }
 }
 
 // We override the virtual resizeEvent of the QWidget to adjust tables column
@@ -312,7 +333,6 @@ void AddressesWidget::onButtonChanged() {
     }else{
         ui->btnAdd->setText("New Contact");
         showHideMineAddressBtn(false);
-
     }
     if(this->menu){
         this->menu->hide();
@@ -320,9 +340,9 @@ void AddressesWidget::onButtonChanged() {
 }
 
 void AddressesWidget::showHideMineAddressBtn(bool show){
-    ui->btnMiningAddress2->setVisible(show);
-    ui->btnMiningAddress->setVisible(show);
-    ui->lblSplit->setVisible(show);
+    //ui->btnMiningAddress2->setVisible(show);
+    //ui->btnMiningAddress->setVisible(show);
+    //ui->lblSplit->setVisible(show);
 }
 
 void AddressesWidget::onNewMinerAddressClicked(){
@@ -367,6 +387,7 @@ void AddressesWidget::onNewAddressClicked(){
         openToastDialog(QString::fromStdString(toast + " Creation Failed"), mainWindow->getGUI());
     }
     // if it's the first one created, display it without having to reload
+// WE NEED TO DISPLAY THE NEW ADDRESS HERE AND IN THE BALANCE AND RECEIVE WIDGETS
     onForeground();
 }
 
@@ -401,7 +422,7 @@ void AddressesWidget::setModel(AddressTableModel *_model)
 void AddressesWidget::onForeground(){
     if(walletModel){
         interfaces::Wallet& wallet = walletModel->wallet();
-        const size_t listsize = wallet.getAddresses().size();
+        auto listsize = model->rowCount(QModelIndex());
         ui->empty->setVisible(listsize == 0);
         showList(listsize > 0);
     }
@@ -420,7 +441,6 @@ void AddressesWidget::showList(bool show){
         ui->listAddresses->setVisible(false);
         ui->listContacts->setVisible(false);
     }
-
 }
 
 AddressesWidget::~AddressesWidget() {

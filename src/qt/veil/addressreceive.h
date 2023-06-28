@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef ADDRESSRECEIVE_H
 #define ADDRESSRECEIVE_H
 
@@ -22,7 +26,7 @@ public:
     ~AddressReceive();
 private Q_SLOTS:
     void onEscapeClicked();
-    void on_btnCopyAddress_clicked();
+    void onBtnCopyAddressClicked();
     void onBtnSaveClicked();
 private:
     Ui::AddressReceive *ui;

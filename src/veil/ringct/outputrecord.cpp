@@ -5,6 +5,8 @@
 #include "outputrecord.h"
 #include <boost/variant.hpp>
 #include <tinyformat.h>
+#include <utilmoneystr.h>
+#include <utilstrencodings.h>
 
 void COutputRecord::AddStealthAddress(const CKeyID& idStealth)
 {
@@ -44,7 +46,7 @@ bool COutputRecord::IsSend() const
 
 bool COutputRecord::IsBasecoin() const
 {
-    return nFlags == OUTPUT_STANDARD;
+    return nType == OUTPUT_STANDARD;
 }
 
 void COutputRecord::MarkSpent(bool isSpent)
@@ -60,12 +62,12 @@ void COutputRecord::MarkPendingSpend(bool isSpent)
     if (isSpent)
         nFlags |= ORF_PENDING_SPEND;
     else
-        nFlags &= ORF_PENDING_SPEND;
+        nFlags &= ~ORF_PENDING_SPEND;
 }
 
 bool COutputRecord::IsSpent(bool fIncludePendingSpend) const
 {
-    return nFlags & ORF_SPENT || nFlags & ORF_PENDING_SPEND;
+    return nFlags & ORF_SPENT || (fIncludePendingSpend && (nFlags & ORF_PENDING_SPEND));
 }
 
 CAmount COutputRecord::GetAmount() const
@@ -91,5 +93,6 @@ bool COutputRecord::GetDestination(CTxDestination& dest) const
 
 std::string COutputRecord::ToString() const
 {
-    return strprintf("TransactionRecord:\n  n=%d\n  nValue=%d\n  nType=%d\n  IsSend()=%d\n", n, nValue, nType, IsSend());
+    return strprintf("TransactionRecord:\n  n=%d\n  nValue=%s\n  nType=%d\n  spend=%d pending=%d\n  flags=%d\n  scriptpubkey=%s\n",
+            n, FormatMoney(GetAmount()), nType, nFlags&ORF_SPENT, nFlags&ORF_PENDING_SPEND, nFlags, HexStr(scriptPubKey));
 }

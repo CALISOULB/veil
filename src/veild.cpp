@@ -1,5 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2018-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -13,9 +14,11 @@
 #include <fs.h>
 #include <rpc/server.h>
 #include <init.h>
+#include <miner.h>
 #include <noui.h>
 #include <shutdown.h>
 #include <util.h>
+#include <key_io.h>
 #include <httpserver.h>
 #include <httprpc.h>
 #include <utilstrencodings.h>
@@ -98,7 +101,7 @@ static bool AppInit(int argc, char* argv[])
             fprintf(stderr, "Error reading configuration file: %s\n", error.c_str());
             return false;
         }
-        // Check for -testnet or -regtest parameter (Params() calls are only valid after this clause)
+        // Check for -testnet, -regtest, -devnet parameter (Params() calls are only valid after this clause)
         try {
             SelectParams(gArgs.GetChainName());
         } catch (const std::exception& e) {
@@ -133,6 +136,30 @@ static bool AppInit(int argc, char* argv[])
         {
             // InitError will have been called with detailed error, which ends up on console
             return false;
+        }
+        std::string sAlgo = gArgs.GetArg("-mine", RANDOMX_STRING);
+        if (!SetMiningAlgorithm(sAlgo))
+        {
+            fprintf(stderr, "Error: Invalid mining algorithm: %s\n", sAlgo.c_str());
+            return false;
+        }
+        std::string sAddress = gArgs.GetArg("-miningaddress", "");
+        if (!sAddress.empty())
+        {
+            // Sanity check the mining address
+            CTxDestination dest = DecodeDestination(sAddress);
+
+            if (!IsValidDestination(dest)) {
+                fprintf(stderr, "Error: miningaddress requires a valid basecoin address\n");
+                return false;
+            }
+
+            // Disallow Stealth Addresses for now
+            CBitcoinAddress address(sAddress);
+            if (address.IsValidStealthAddress()) {
+                fprintf(stderr, "Error: miningaddress must be a basecoin address\n");
+                return false;
+            }
         }
         if (gArgs.GetBoolArg("-daemon", false))
         {
@@ -172,6 +199,7 @@ static bool AppInit(int argc, char* argv[])
 
     if (!fRet)
     {
+        StartShutdown();
         Interrupt();
     } else {
         WaitForShutdown();

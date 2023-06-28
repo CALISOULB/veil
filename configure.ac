@@ -1,18 +1,35 @@
 dnl require autoconf 2.60 (AS_ECHO/AS_ECHO_N)
 AC_PREREQ([2.60])
 define(_CLIENT_VERSION_MAJOR, 1)
-define(_CLIENT_VERSION_MINOR, 0)
-define(_CLIENT_VERSION_REVISION, 0)
-define(_CLIENT_VERSION_BUILD, 10)
-define(_CLIENT_VERSION_IS_RELEASE, true)
-define(_COPYRIGHT_YEAR, 2019)
+define(_CLIENT_VERSION_MINOR, 2)
+define(_CLIENT_VERSION_REVISION, 2)
+define(_CLIENT_VERSION_BUILD, 99)
+define(_CLIENT_VERSION_IS_RELEASE, false)
+define(_COPYRIGHT_YEAR, 2021)
 define(_COPYRIGHT_HOLDERS,[The %s developers])
 define(_COPYRIGHT_HOLDERS_SUBSTITUTION,[[Veil Core]])
-AC_INIT([Veil Core],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION],[https://github.com/Veil-Project/veil/issues],[veil],[https://veil-project.com/])
+AC_INIT([Veil Core],[_CLIENT_VERSION_MAJOR._CLIENT_VERSION_MINOR._CLIENT_VERSION_REVISION._CLIENT_VERSION_BUILD],[https://github.com/Veil-Project/veil/issues],[veil],[https://veil-project.com/])
 AC_CONFIG_SRCDIR([src/validation.cpp])
 AC_CONFIG_HEADERS([src/config/veil-config.h])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIR([build-aux/m4])
+
+dnl Add config links for asm includes for RandomX
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_epilogue_linux.inc:src/crypto/randomx/asm/program_epilogue_linux.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_epilogue_store.inc:src/crypto/randomx/asm/program_epilogue_store.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_epilogue_win64.inc:src/crypto/randomx/asm/program_epilogue_win64.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_loop_load.inc:src/crypto/randomx/asm/program_loop_load.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_loop_store.inc:src/crypto/randomx/asm/program_loop_store.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_prologue_linux.inc:src/crypto/randomx/asm/program_prologue_linux.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_prologue_win64.inc:src/crypto/randomx/asm/program_prologue_win64.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_read_dataset.inc:src/crypto/randomx/asm/program_read_dataset.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_read_dataset_sshash_fin.inc:src/crypto/randomx/asm/program_read_dataset_sshash_fin.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_read_dataset_sshash_init.inc:src/crypto/randomx/asm/program_read_dataset_sshash_init.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_sshash_constants.inc:src/crypto/randomx/asm/program_sshash_constants.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_sshash_load.inc:src/crypto/randomx/asm/program_sshash_load.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_sshash_prefetch.inc:src/crypto/randomx/asm/program_sshash_prefetch.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/program_xmm_constants.inc:src/crypto/randomx/asm/program_xmm_constants.inc])
+AC_CONFIG_LINKS([src/crypto/randomx/asm/randomx_reciprocal.inc:src/crypto/randomx/asm/randomx_reciprocal.inc])
 
 BITCOIN_DAEMON_NAME=veild
 BITCOIN_GUI_NAME=veil-qt
@@ -304,6 +321,7 @@ fi
 if test "x$CXXFLAGS_overridden" = "xno"; then
   AX_CHECK_COMPILE_FLAG([-Wall],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wall"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wextra],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wextra"],,[[$CXXFLAG_WERROR]])
+  AX_CHECK_COMPILE_FLAG([-Wgnu],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wgnu"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wformat],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wformat"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wvla],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wvla"],,[[$CXXFLAG_WERROR]])
   AX_CHECK_COMPILE_FLAG([-Wformat-security],[WARN_CXXFLAGS="$WARN_CXXFLAGS -Wformat-security"],,[[$CXXFLAG_WERROR]])
@@ -466,7 +484,10 @@ case $host in
      fi
      case $host in
        i?86-*) WINDOWS_BITS=32 ;;
-       x86_64-*) WINDOWS_BITS=64 ;;
+       x86_64-*)
+          WINDOWS_BITS=64
+          X86_64=yes
+       ;;
        *) AC_MSG_ERROR("Could not determine win32/win64 for installer") ;;
      esac
      AC_SUBST(WINDOWS_BITS)
@@ -482,6 +503,9 @@ case $host in
      ;;
   *darwin*)
      TARGET_OS=darwin
+     case $host in
+       x86_64-*) X86_64=yes ;;
+     esac
      LEVELDB_TARGET_FLAGS="-DOS_MACOSX"
      if  test x$cross_compiling != xyes; then
        BUILD_OS=darwin
@@ -517,6 +541,7 @@ case $host in
            LIBS="$LIBS -L$bdb_prefix/lib"
          fi
          if test x$qt5_prefix != x; then
+           CPPFLAGS="$CPPFLAGS -I$qt5_prefix/include"
            PKG_CONFIG_PATH="$qt5_prefix/lib/pkgconfig:$PKG_CONFIG_PATH"
            export PKG_CONFIG_PATH
          fi
@@ -544,7 +569,7 @@ case $host in
      fi
 
      AX_CHECK_LINK_FLAG([[-Wl,-headerpad_max_install_names]], [LDFLAGS="$LDFLAGS -Wl,-headerpad_max_install_names"])
-     CPPFLAGS="$CPPFLAGS -DMAC_OSX"
+     CPPFLAGS="$CPPFLAGS -DMAC_OSX -DOBJC_OLD_DISPATCH_PROTOTYPES=0" 
      OBJCXXFLAGS="$CXXFLAGS"
      ;;
    *android*)
@@ -554,6 +579,10 @@ case $host in
    *linux*)
      TARGET_OS=linux
      LEVELDB_TARGET_FLAGS="-DOS_LINUX"
+     case $host in
+       aarch64-*) ARM_64=yes ;;
+       x86_64-*) X86_64=yes ;;
+     esac
      ;;
    *kfreebsd*)
      LEVELDB_TARGET_FLAGS="-DOS_KFREEBSD"
@@ -1371,6 +1400,8 @@ fi
 AM_CONDITIONAL([TARGET_DARWIN], [test x$TARGET_OS = xdarwin])
 AM_CONDITIONAL([BUILD_DARWIN], [test x$BUILD_OS = xdarwin])
 AM_CONDITIONAL([TARGET_WINDOWS], [test x$TARGET_OS = xwindows])
+AM_CONDITIONAL([TARGET_ARM64], [test x$ARM_64 = xyes])
+AM_CONDITIONAL([TARGET_X86_64], [test x$X86_64 = xyes])
 AM_CONDITIONAL([ENABLE_WALLET],[test x$enable_wallet = xyes])
 AM_CONDITIONAL([ENABLE_TESTS],[test x$BUILD_TEST = xyes])
 AM_CONDITIONAL([ENABLE_QT],[test x$bitcoin_enable_qt = xyes])
@@ -1455,6 +1486,8 @@ AC_CONFIG_LINKS([test/functional/test_runner.py:test/functional/test_runner.py])
 AC_CONFIG_LINKS([test/util/bitcoin-util-test.py:test/util/bitcoin-util-test.py])
 AC_CONFIG_LINKS([test/util/rpcauth-test.py:test/util/rpcauth-test.py])
 
+AM_PROG_AS
+
 dnl boost's m4 checks do something really nasty: they export these vars. As a
 dnl result, they leak into secp256k1's configure and crazy things happen.
 dnl Until this is fixed upstream and we've synced, we'll just un-export them.
@@ -1524,6 +1557,8 @@ echo "  sanitizers    = $use_sanitizers"
 echo "  debug enabled = $enable_debug"
 echo "  gprof enabled = $enable_gprof"
 echo "  werror        = $enable_werror"
+echo "  arm x64       = $ARM_64"
+echo "  x86_64        = $X86_64"
 echo
 echo "  target os     = $TARGET_OS"
 echo "  build os      = $BUILD_OS"

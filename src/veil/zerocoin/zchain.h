@@ -33,14 +33,17 @@ void FindMints(std::vector<CMintMeta> vMintsToFind, std::vector<CMintMeta>& vMin
 int GetZerocoinStartHeight();
 bool GetZerocoinMint(const CBigNum& bnPubcoin, uint256& txHash);
 bool IsPubcoinInBlockchain(const uint256& hashPubcoin, int& nHeightTx, uint256& txid, CBlockIndex* pindexChain);
+bool IsPubcoinSpendInBlockchain(const uint256& hashPubcoin, int& nHeightTx, uint256& txid, CBlockIndex* pindexChain);
 bool IsSerialKnown(const CBigNum& bnSerial);
-bool IsSerialInBlockchain(const CBigNum& bnSerial, int& nHeightTx, CBlockIndex* pindex = nullptr);
+bool IsSerialInBlockchain(const uint256& hashSerial, int& nHeightTx, const CBlockIndex* pindex = nullptr, bool log = true);
+bool IsSerialInBlockchain(const CBigNum& bnSerial, int& nHeightTx, const CBlockIndex* pindex = nullptr);
 bool IsSerialInBlockchain(const uint256& hashSerial, int& nHeightTx, uint256& txidSpend);
 bool IsSerialInBlockchain(const uint256& hashSerial, int& nHeightTx, uint256& txidSpend, CTransactionRef& txRef);
 bool RemoveSerialFromDB(const CBigNum& bnSerial);
 std::string ReindexZerocoinDB();
 std::shared_ptr<libzerocoin::CoinSpend> TxInToZerocoinSpend(const CTxIn& txin);
 bool OutputToPublicCoin(const CTxOutBase* out, libzerocoin::PublicCoin& coin);
+bool ThreadedBatchVerify(const std::vector<libzerocoin::SerialNumberSoKProof>* vProofs, int nThreads = -1);
 bool TxOutToPublicCoin(const CTxOut& txout, libzerocoin::PublicCoin& pubCoin);
 std::list<libzerocoin::CoinDenomination> ZerocoinSpendListFromBlock(const CBlock& block);
 

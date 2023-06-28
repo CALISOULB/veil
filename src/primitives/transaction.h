@@ -1,5 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2018-2019 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -139,6 +140,7 @@ public:
     }
 
     CAmount GetZerocoinSpent() const;
+    bool IsZerocoinSpend() const;
 
     explicit CTxIn(COutPoint prevoutIn, CScript scriptSigIn=CScript(), uint32_t nSequenceIn=SEQUENCE_FINAL);
     CTxIn(uint256 hashPrevTx, uint32_t nOut, CScript scriptSigIn=CScript(), uint32_t nSequenceIn=SEQUENCE_FINAL);
@@ -432,6 +434,8 @@ public:
 
     CTxOut ToTxOut() const { return CTxOut(nValue, scriptPubKey); }
 };
+
+static const uint32_t EPHEMERAL_PUBKEY_LENGTH = 33;
 
 class CTxOutCT : public CTxOutBase
 {

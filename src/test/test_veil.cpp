@@ -85,7 +85,7 @@ TestingSetup::TestingSetup(const std::string& chainName) : BasicTestingSetup(cha
 
         // We have to run a scheduler thread to prevent ActivateBestChain
         // from blocking due to queue overrun.
-        threadGroup.create_thread(boost::bind(&CScheduler::serviceQueue, &scheduler));
+        threadGroup.create_thread(std::bind(&CScheduler::serviceQueue, &scheduler));
         GetMainSignals().RegisterBackgroundSignalScheduler(scheduler);
 
         mempool.setSanityCheck(1.0);
@@ -155,13 +155,10 @@ TestChain100Setup::CreateAndProcessBlock(const std::vector<CMutableTransaction>&
     for (const CMutableTransaction& tx : txns)
         block.vtx.push_back(MakeTransactionRef(tx));
     // IncrementExtraNonce creates a valid coinbase and merkleRoot
-    {
-        LOCK(cs_main);
-        unsigned int extraNonce = 0;
-        IncrementExtraNonce(&block, chainActive.Tip(), extraNonce);
-    }
+    unsigned int extraNonce = 0;
+    IncrementExtraNonce(&block, chainActive.Height(), extraNonce);
 
-    while (!CheckProofOfWork(block.GetPoWHash(), block.nBits, chainparams.GetConsensus())) ++block.nNonce;
+    while (!CheckProofOfWork(block.GetX16RTPoWHash(), block.nBits, chainparams.GetConsensus())) ++block.nNonce;
 
     std::shared_ptr<const CBlock> shared_pblock = std::make_shared<const CBlock>(block);
     ProcessNewBlock(chainparams, shared_pblock, true, nullptr);

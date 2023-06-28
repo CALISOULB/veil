@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/tooltipbalance.h>
 #include <qt/veil/forms/ui_tooltipbalance.h>
 
@@ -9,8 +13,8 @@
 
 TooltipBalance::TooltipBalance(QWidget *parent, int _unit, int64_t nZerocoinBalance, int64_t nRingBalance, int64_t basecoinBalance) :
     QWidget(parent),
-    unit(_unit),
-    ui(new Ui::TooltipBalance)
+    ui(new Ui::TooltipBalance),
+    unit(_unit)
 {
     ui->setupUi(this);
     ui->textZero->setText(BitcoinUnits::formatWithUnit(unit, nZerocoinBalance, false, BitcoinUnits::separatorAlways));
@@ -61,8 +65,6 @@ void TooltipBalance::showEvent(QShowEvent *event){
     a->setEndValue(1);
     a->setEasingCurve(QEasingCurve::InBack);
     a->start(QPropertyAnimation::DeleteWhenStopped);
-
-    QTimer::singleShot(5000, this, SLOT(hide()));
 }
 
 void TooltipBalance::hideEvent(QHideEvent *event){

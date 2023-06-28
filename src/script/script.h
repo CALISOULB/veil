@@ -190,7 +190,7 @@ enum opcodetype
 };
 
 // Maximum value that an opcode can be
-static const unsigned int MAX_OPCODE = OP_NOP10;
+static const unsigned int MAX_OPCODE = OP_ZEROCOINSPEND;
 
 const char* GetOpName(opcodetype opcode);
 
@@ -328,7 +328,7 @@ public:
 
         std::vector<unsigned char> result;
         const bool neg = value < 0;
-        uint64_t absvalue = neg ? -value : value;
+        uint64_t absvalue = neg ? ~static_cast<uint64_t>(value) + 1 : static_cast<uint64_t>(value);
 
         while(absvalue)
         {

@@ -58,6 +58,7 @@ WalletView::WalletView(const PlatformStyle *_platformStyle, QWidget *parent):
 
     receiveCoinsPage = new ReceiveCoinsDialog(platformStyle);
     receiveWidget = new ReceiveWidget(this, this);
+    miningWidget = new MiningWidget(this, this);
     sendCoinsPage = new SendCoinsDialog(platformStyle,0, this);
     addressesWidget = new AddressesWidget(platformStyle, this);
     settingsWidget = new SettingsWidget(this);
@@ -69,6 +70,7 @@ WalletView::WalletView(const PlatformStyle *_platformStyle, QWidget *parent):
     addWidget(transactionsPage);
     //addWidget(receiveCoinsPage);
     addWidget(receiveWidget);
+    addWidget(miningWidget);
     addWidget(sendCoinsPage);
     addWidget(addressesWidget);
     addWidget(settingsWidget);
@@ -90,10 +92,18 @@ WalletView::WalletView(const PlatformStyle *_platformStyle, QWidget *parent):
     connect(sendCoinsPage, SIGNAL(message(QString,QString,unsigned int)), this, SIGNAL(message(QString,QString,unsigned int)));
     // Pass through messages from transactionView
     connect(transactionView, SIGNAL(message(QString,QString,unsigned int)), this, SIGNAL(message(QString,QString,unsigned int)));
+
+    // Notification that a new receive Address has been selected
+    connect(addressesWidget, SIGNAL(rcvAddressSelected(CTxDestination*)), this, SLOT(updatedRcvAddySelection(CTxDestination*)));
 }
 
 WalletView::~WalletView()
 {
+}
+
+void WalletView::updatedRcvAddySelection(CTxDestination* selectedRcvAddress){
+    receiveWidget->setDisplayRcvAddress(selectedRcvAddress);
+    Q_EMIT signalChangeSelectedAddress(selectedRcvAddress);
 }
 
 void WalletView::setBitcoinGUI(BitcoinGUI *gui)
@@ -139,6 +149,7 @@ void WalletView::setWalletModel(WalletModel *_walletModel)
     settingsWidget->setWalletModel(walletModel);
     //receiveCoinsPage->setModel(_walletModel);
     receiveWidget->setWalletModel(_walletModel);
+    miningWidget->setWalletModel(_walletModel);
     sendCoinsPage->setModel(_walletModel);
     usedReceivingAddressesPage->setModel(_walletModel ? _walletModel->getAddressTableModel() : nullptr);
     usedSendingAddressesPage->setModel(_walletModel ? _walletModel->getAddressTableModel() : nullptr);
@@ -213,6 +224,11 @@ void WalletView::gotoSendCoinsPage(QString addr)
         sendCoinsPage->setAddress(addr);
 }
 
+void WalletView::gotoMiningPage()
+{
+    setCurrentWidget(miningWidget);
+}
+
 void WalletView::gotoAddressesPage(){
     setCurrentWidget(addressesWidget);
     addressesWidget->onForeground();
@@ -280,7 +296,7 @@ bool WalletView::encryptWallet(bool status)
 void WalletView::backupWallet()
 {
     QString filename = GUIUtil::getSaveFileName(this,
-        tr("Backup Wallet"), QString(),
+        tr("Backup Wallet"), QDateTime::currentDateTime().toString("'wallet'-yyyy-MM-dd-hh-mm-ss"),
         tr("Wallet Data (*.dat)"), nullptr);
 
     if (filename.isEmpty())
@@ -310,7 +326,8 @@ void WalletView::unlockWallet()
     if(!walletModel)
         return;
     // Unlock wallet when requested by wallet model
-    if (walletModel->getEncryptionStatus() == WalletModel::Locked)
+    auto status = walletModel->getEncryptionStatus();
+    if (status == WalletModel::Locked || status == WalletModel::UnlockedForStakingOnly)
     {
         gui->showHide(true);
         AskPassphraseDialog *dlg = new AskPassphraseDialog(AskPassphraseDialog::Unlock, gui);

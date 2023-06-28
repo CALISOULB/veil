@@ -121,6 +121,11 @@ const CLogCategoryDesc LogCategories[] =
     {BCLog::LEVELDB, "leveldb"},
     {BCLog::ZEROCOINDB, "zerocoindb"},
     {BCLog::BLOCKCREATION, "blockcreation"},
+    {BCLog::CHAINSCORE, "chainscore"},
+    {BCLog::STAGING, "staging"},
+    {BCLog::MINING, "mining"},
+    {BCLog::STAKING, "staking"},
+    {BCLog::RINGCT, "ringct"},
     {BCLog::ALL, "1"},
     {BCLog::ALL, "all"},
 };

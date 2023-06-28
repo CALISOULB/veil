@@ -8,6 +8,7 @@
 #include <qt/transactionrecord.h>
 
 #include <cstdlib>
+#include <iostream>
 
 // Earliest date that can be represented (far in the past)
 const QDateTime TransactionFilterProxy::MIN_DATE = QDateTime::fromTime_t(0);
@@ -23,7 +24,8 @@ TransactionFilterProxy::TransactionFilterProxy(QObject *parent) :
     watchOnlyFilter(WatchOnlyFilter_All),
     minAmount(0),
     limitRows(-1),
-    showInactive(true)
+    showInactive(true),
+    fHideOrphans(true)
 {
 }
 
@@ -43,6 +45,9 @@ bool TransactionFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex &
     if (involvesWatchAddress && watchOnlyFilter == WatchOnlyFilter_No)
         return false;
     if (!involvesWatchAddress && watchOnlyFilter == WatchOnlyFilter_Yes)
+        return false;
+
+    if (fHideOrphans && isOrphan(status, type))
         return false;
 
     QDateTime datetime = index.data(TransactionTableModel::DateRole).toDateTime();
@@ -118,4 +123,19 @@ int TransactionFilterProxy::rowCount(const QModelIndex &parent) const
     {
         return QSortFilterProxyModel::rowCount(parent);
     }
+}
+
+void TransactionFilterProxy::setHideOrphans(bool hide){
+    fHideOrphans = hide;
+    invalidateFilter();
+}
+
+bool TransactionFilterProxy::isOrphan(const int status, const int type) const {
+
+    if(status == TransactionStatus::Confirmed)
+        return false;
+
+    return ( (type == TransactionRecord::Generated ||
+              type == TransactionRecord::ZeroCoinStake  || type == TransactionRecord::CTGenerated || type == TransactionRecord::RingCTGenerated)
+             && (status == TransactionStatus::Conflicted || status == TransactionStatus::NotAccepted || TransactionStatus::Abandoned) );
 }

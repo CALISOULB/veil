@@ -1,5 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -45,6 +46,8 @@ class CTxMemPool;
 class CValidationState;
 struct ChainTxData;
 
+extern int global_randomx_flags;
+
 struct PrecomputedTransactionData;
 struct LockPoints;
 
@@ -83,6 +86,8 @@ static const unsigned int UNDOFILE_CHUNK_SIZE = 0x100000; // 1 MiB
 static const int MAX_SCRIPTCHECK_THREADS = 16;
 /** -par default (number of script-checking threads, 0 = auto) */
 static const int DEFAULT_SCRIPTCHECK_THREADS = 0;
+/** Threads used when batch verifying zeroknowledge proofs **/
+static const int DEFAULT_BATCHVERIFY_THREADS = 2;
 /** Number of blocks that can be requested at any given time from a single peer. */
 static const int MAX_BLOCKS_IN_TRANSIT_PER_PEER = 16;
 /** Timeout in seconds during which a peer must stall block download progress before being disconnected. */
@@ -101,9 +106,9 @@ static const int MAX_BLOCKTXN_DEPTH = 10;
  *  want to make this a per-peer adaptive value at some point. */
 static const unsigned int BLOCK_DOWNLOAD_WINDOW = 1024;
 /** Time to wait (in seconds) between writing blocks/block index to disk. */
-static const unsigned int DATABASE_WRITE_INTERVAL = 60 * 60;
+static const unsigned int DATABASE_WRITE_INTERVAL = 60 * 6;
 /** Time to wait (in seconds) between flushing chainstate to disk. */
-static const unsigned int DATABASE_FLUSH_INTERVAL = 24 * 60 * 60;
+static const unsigned int DATABASE_FLUSH_INTERVAL = 24 * 60 * 6;
 /** Maximum length of reject messages. */
 static const unsigned int MAX_REJECT_MESSAGE_LENGTH = 111;
 /** Block download timeout base, expressed in millionths of the block interval (i.e. 10 min) */
@@ -149,7 +154,9 @@ extern CBlockPolicyEstimator feeEstimator;
 extern CTxMemPool mempool;
 extern std::atomic_bool g_is_mempool_loaded;
 typedef std::unordered_map<uint256, CBlockIndex*, BlockHasher> BlockMap;
-extern BlockMap& mapBlockIndex;
+// Only protects the map, not any attributes of its contents.
+extern CCriticalSection& cs_mapblockindex;
+extern BlockMap& mapBlockIndex GUARDED_BY(cs_mapblockindex);
 extern uint64_t nLastBlockTx;
 extern uint64_t nLastBlockWeight;
 extern const std::string strMessageMagic;
@@ -158,6 +165,8 @@ extern CConditionVariable g_best_block_cv;
 extern uint256 g_best_block;
 extern std::atomic_bool fImporting;
 extern std::atomic_bool fReindex;
+extern std::atomic_bool fReindexChainState;
+extern std::atomic_bool fVerifying;
 extern bool fSkipRangeproof;
 extern bool fBusyImporting;
 extern int nScriptCheckThreads;
@@ -169,6 +178,8 @@ extern unsigned int nStakeMinAge;
 extern size_t nCoinCacheUsage;
 extern std::map<uint256, unsigned int> mapHashedBlocks; //blockhash, last timestamp hashed
 extern std::map<unsigned int, unsigned int> mapStakeHashCounter;
+extern std::map<uint256, uint256> mapStakeSeen;
+extern std::set<uint256> setBatchVerified;
 /** A fee rate smaller than this is considered zero fee (for relaying, mining and transaction creation) */
 extern CFeeRate minRelayTxFee;
 /** Absolute maximum transaction fee (in satoshis) used by wallet and mempool (rejects high fee in sendrawtransaction) */
@@ -202,7 +213,7 @@ static const unsigned int MIN_BLOCKS_TO_KEEP = 288;
 static const unsigned int NODE_NETWORK_LIMITED_MIN_BLOCKS = 288;
 
 static const signed int DEFAULT_CHECKBLOCKS = 6;
-static const unsigned int DEFAULT_CHECKLEVEL = 3;
+static const unsigned int DEFAULT_CHECKLEVEL = 4;
 
 // Require that user allocate at least 550MB for block & undo files (blk???.dat and rev???.dat)
 // At 1MB per block, 288 blocks = 288MB.
@@ -234,7 +245,7 @@ static const uint64_t MIN_DISK_SPACE_FOR_BLOCK_FILES = 550 * 1024 * 1024;
  * @param[out]  fNewBlock A boolean which is set to indicate if the block was first received via this call
  * @return True if state.IsValid()
  */
-bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, bool fForceProcessing, bool* fNewBlock) LOCKS_EXCLUDED(cs_main);
+bool ProcessNewBlock(const CChainParams& chainparams, const std::shared_ptr<const CBlock> pblock, bool fForceProcessing, bool* fNewBlock, bool fSkipComputation = false) LOCKS_EXCLUDED(cs_main);
 
 /**
  * Process incoming block headers.
@@ -257,7 +268,7 @@ FILE* OpenBlockFile(const CDiskBlockPos &pos, bool fReadOnly = false);
 /** Translation to a filesystem path */
 fs::path GetBlockPosFilename(const CDiskBlockPos &pos, const char *prefix);
 /** Import blocks from an external file */
-bool LoadExternalBlockFile(const CChainParams& chainparams, FILE* fileIn, CDiskBlockPos *dbp = nullptr);
+bool LoadExternalBlockFile(const CChainParams& chainparams, FILE* fileIn, CDiskBlockPos* dbp = nullptr);
 /** Ensures we have a genesis block in the block tree, possibly writing one to disk. */
 bool LoadGenesisBlock(const CChainParams& chainparams);
 /** Load the block tree and coins database from disk,
@@ -274,13 +285,13 @@ bool IsInitialBlockDownload();
 /** Check whether both headers and blocks are synced **/
 bool HeadersAndBlocksSynced();
 /** Retrieve a transaction (from memory pool, or from disk, if possible) */
-bool GetTransaction(const uint256& hash, CTransactionRef& tx, const Consensus::Params& params, uint256& hashBlock, bool fAllowSlow = false, CBlockIndex* blockIndex = nullptr);
+bool GetTransaction(const uint256& hash, CTransactionRef& tx, const Consensus::Params& params, uint256& hashBlock, bool fAllowSlow = false, CBlockIndex* blockIndex = nullptr, bool log = true);
 
-bool IsBlockHashInChain(const uint256& hashBlock, int& nHeight, CBlockIndex* pindex = nullptr);
+bool IsBlockHashInChain(const uint256& hashBlock, int& nHeight, const CBlockIndex* pindex = nullptr);
 
 /** Determine if the provided txid corresponds to a transaction in the blockchain */
-bool IsTransactionInChain(const uint256& txId, int& nHeightTx, CTransactionRef& txRef, const Consensus::Params& params, CBlockIndex* pindex = nullptr);
-bool IsTransactionInChain(const uint256& txId, int& nHeightTx, const Consensus::Params& params, CBlockIndex* pindex = nullptr);
+bool IsTransactionInChain(const uint256& txId, int& nHeightTx, CTransactionRef& txRef, const Consensus::Params& params, const CBlockIndex* pindex = nullptr, bool log = true);
+bool IsTransactionInChain(const uint256& txId, int& nHeightTx, const Consensus::Params& params, const CBlockIndex* pindex = nullptr);
 
 /**
  * Find the best known block, and make it the tip of the block chain
@@ -300,7 +311,7 @@ uint64_t CalculateCurrentUsage();
 /**
  *  Mark one block file as pruned.
  */
-void PruneOneBlockFile(const int fileNumber);
+void PruneOneBlockFile(const int fileNumber) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
 /**
  *  Actually unlink the specified files
@@ -367,7 +378,24 @@ bool TestLockPointValidity(const LockPoints* lp);
  */
 bool CheckSequenceLocks(const CTransaction &tx, int flags, LockPoints* lp = nullptr, bool useExistingLockPoints = false);
 
-bool ContextualCheckZerocoinSpend(const CTransaction& tx, const libzerocoin::CoinSpend& spend, const uint256& hashBlock, CBlockIndex* pindex, bool fSkipSignatureVerify = false);
+enum ContextualCheckMode
+{
+    CHECK_LIMP_MODE = (1 << 0),
+    CHECK_DENOM_HARD = (1 << 1), //Return false on denom check being invalid
+    CHECK_DENOM_SOFT = (1 << 2), //Only warn about an invalid denom
+    CHECK_SOK = (1 << 3),
+    CHECK_ZKP= (1 << 4),
+    CHECK_BLACKLIST_HARD = (1 << 5),
+    CHECK_LIGHTMODE = (1 << 6), //Check database of spent pubcoinhashes
+};
+
+enum FailReason
+{
+    FAIL_DENOMCHECK = (1 << 0),
+    FAIL_BLACKLIST = (1 << 1)
+};
+
+bool ContextualCheckZerocoinSpend(const CTransaction& tx, const libzerocoin::CoinSpend& spend, const uint256& hashBlock, CBlockIndex* pindex, int checkMode, int& nFailReason);
 bool ContextualCheckZerocoinMint(const CTransaction& tx, const libzerocoin::PublicCoin& coin, CBlockIndex* pindex);
 
 /**
@@ -422,6 +450,8 @@ bool ReadRawBlockFromDisk(std::vector<uint8_t>& block, const CBlockIndex* pindex
 
 /** Functions for validating blocks and updating the block tree */
 
+bool CheckConsecutivePoW(const CBlock& block, const CBlockIndex* pindexPrev);
+
 /** Context-independent validity checks */
 bool CheckBlock(const CBlock& block, CValidationState& state, const Consensus::Params& consensusParams, bool fSkipComputation = false, bool fCheckPOW = true, bool fCheckMerkleRoot = true);
 
@@ -456,7 +486,7 @@ bool ReplayBlocks(const CChainParams& params, CCoinsView* view);
 
 inline CBlockIndex* LookupBlockIndex(const uint256& hash)
 {
-    AssertLockHeld(cs_main);
+    LOCK(cs_mapblockindex);
     BlockMap::const_iterator it = mapBlockIndex.find(hash);
     return it == mapBlockIndex.end() ? nullptr : it->second;
 }
@@ -499,12 +529,14 @@ extern std::unique_ptr<CZerocoinDB> pzerocoinDB;
  */
 int GetSpendHeight(const CCoinsViewCache& inputs);
 
+static bool isPowTimeStampActive() { return (chainActive.Tip()->nTime >= nPowTimeStampActive); }
+
 extern VersionBitsCache versionbitscache;
 
 /**
  * Determine what nVersion a new block should use.
  */
-int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params);
+int32_t ComputeBlockVersion(const CBlockIndex* pindexPrev, const Consensus::Params& params, const uint32_t& blockTime, const bool& fProofOfWork);
 
 /** Reject codes greater or equal to this can be returned by AcceptToMemPool
  * for transactions, to signal internal conditions. They cannot and should not

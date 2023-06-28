@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/qtutils.h>
 
 #include <qt/veil/toast.h>
@@ -75,4 +79,12 @@ void openToastDialog(QString text, QWidget* gui){
     animation->start(QAbstractAnimation::DeleteWhenStopped);
     widget->activateWindow();
     widget->show();
+}
+
+
+QSettings * getSettings(){
+    QString m_path = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation);
+    QString m_filename = "config.ini" ;
+    QSettings *settings = new QSettings(m_path + "/"+ m_filename,QSettings::IniFormat);
+    return settings;
 }

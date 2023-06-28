@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/addressnewcontact.h>
 #include <qt/veil/forms/ui_addressnewcontact.h>
 
@@ -15,8 +19,8 @@
 
 AddressNewContact::AddressNewContact(QWidget *parent, WalletModel* _walletModel) :
     QDialog(parent),
-    walletModel(_walletModel),
-    ui(new Ui::AddressNewContact)
+    ui(new Ui::AddressNewContact),
+    walletModel(_walletModel)
 {
     ui->setupUi(this);
     connect(ui->btnEsc,SIGNAL(clicked()),this, SLOT(onEscapeClicked()));

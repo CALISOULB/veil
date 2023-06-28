@@ -1,4 +1,5 @@
 // Copyright (c) 2017-2019 The Particl Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -32,7 +33,9 @@
 #include <veil/mnemonic/mnemonic.h>
 #include <crypto/sha256.h>
 #include <warnings.h>
-
+#ifdef ENABLE_WALLET
+#include <wallet/wallet.h> // For DEFAULT_DISABLE_WALLET
+#endif
 #include <univalue.h>
 #include <stdint.h>
 
@@ -104,6 +107,88 @@ static UniValue getnewaddress(const JSONRPCRequest &request)
     return stealthAddress.ToString(fBech32);
 }
 
+static UniValue getstealthchangeaddress(const JSONRPCRequest &request)
+{
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(wallet.get(), request.fHelp))
+        return NullUniValue;
+
+    if (request.fHelp || request.params.size() != 0)
+        throw std::runtime_error(
+                "getstealthchangeaddress\n"
+                "Returns the default stealth change address."
+                + HelpRequiringPassphrase(wallet.get()) +
+                "\nResult:\n"
+                "\"address\"              (string) The stealth change address\n"
+                "\nExamples:\n"
+                + HelpExampleCli("getstealthchangeaddress", "")
+                + HelpExampleRpc("getstealthchangeaddress", ""));
+
+    EnsureWalletIsUnlocked(wallet.get());
+    auto pAnonWallet = wallet->GetAnonWallet();
+    auto address = pAnonWallet->GetStealthChangeAddress();
+
+    return address.ToString(true);
+}
+
+static UniValue restoreaddresses(const JSONRPCRequest &request)
+{
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(wallet.get(), request.fHelp))
+        return NullUniValue;
+
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+                "restoreaddresses (generate_count)\n"
+                "Regenerates deterministic stealth addresses to give wallet knowledge that they are owned"
+                + HelpRequiringPassphrase(wallet.get()) +
+                "\nArguments:\n"
+                "1. generate_count       (int, required) Amount of addresses to add to the wallet internally. WARNING: Generate as few as needed. High address counts will slow down sync times.\n"
+                "\nResult:\n"
+                "\"address\"              (string) The new stealth address\n"
+                "\nExamples:\n"
+                + HelpExampleCli("restoreaddresses", "10")
+                + HelpExampleRpc("restoreaddresses", "10"));
+
+    EnsureWalletIsUnlocked(wallet.get());
+    auto pAnonWallet = wallet->GetAnonWallet();
+
+    unsigned int n = request.params[0].get_int();
+
+    for (unsigned int i = 0; i < n; i++) {
+        CStealthAddress stealthAddress;
+        if (!pAnonWallet->NewStealthKey(stealthAddress, 0, nullptr))
+            throw JSONRPCError(RPC_WALLET_ERROR, _("NewStealthKeyFromAccount failed."));
+    }
+    return NullUniValue;
+}
+
+static UniValue rescanringctwallet(const JSONRPCRequest &request)
+{
+    std::shared_ptr<CWallet> const wallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(wallet.get(), request.fHelp))
+        return NullUniValue;
+
+    if (request.fHelp || !request.params.empty())
+        throw std::runtime_error(
+                "rescanringctwallet\n"
+                "Rescans all transactions in the RingCT & CT Wallets."
+                + HelpRequiringPassphrase(wallet.get()) +
+                "\nExamples:\n"
+                + HelpExampleCli("rescanringctwallet", "")
+                + HelpExampleRpc("rescanringctwallet", ""));
+
+
+
+    EnsureWalletIsUnlocked(wallet.get());
+    auto pAnonWallet = wallet->GetAnonWallet();
+    LOCK2(cs_main, wallet->cs_wallet);
+
+    pAnonWallet->RescanWallet();
+    return NullUniValue;
+}
+
+/*
 static void push(UniValue & entry, std::string key, UniValue const & value)
 {
     if (entry[key].getType() == 0) {
@@ -127,6 +212,7 @@ static std::string getAddress(UniValue const & transaction)
     }
     return std::string();
 }
+*/
 
 enum SortCodes
 {
@@ -190,6 +276,8 @@ static UniValue SendToInner(const JSONRPCRequest &request, OutputTypes typeIn, O
     if (wallet->GetBroadcastTransactions() && !g_connman) {
         throw JSONRPCError(RPC_CLIENT_P2P_DISABLED, "Error: Peer-to-peer functionality missing or disabled");
     }
+
+    int64_t nComputeTimeStart = GetTimeMillis();
 
     CAmount nTotal = 0;
 
@@ -305,7 +393,7 @@ static UniValue SendToInner(const JSONRPCRequest &request, OutputTypes typeIn, O
 
     switch (typeIn) {
         case OUTPUT_STANDARD:
-            if (nTotal > wallet->GetBalance()) {
+            if (nTotal > wallet->GetBasecoinBalance()) {
                 throw JSONRPCError(RPC_WALLET_INSUFFICIENT_FUNDS, "Insufficient funds");
             }
             break;
@@ -445,8 +533,9 @@ static UniValue SendToInner(const JSONRPCRequest &request, OutputTypes typeIn, O
                 throw JSONRPCError(RPC_WALLET_ERROR, strprintf("AddBlindedInputs failed: %s.", sError));
             break;
         case OUTPUT_RINGCT:
-            if (0 != pwalletAnon->AddAnonInputs(wtx, rtx, vecSend, !fCheckFeeOnly, nRingSize, nInputsPerSig, nFeeRet, &coincontrol, sError))
-                throw JSONRPCError(RPC_WALLET_ERROR, strprintf("AddAnonInputs failed: %s.", sError));
+            if (!pwalletAnon->AddAnonInputs(wtx, rtx, vecSend, !fCheckFeeOnly, nRingSize,
+                                            nInputsPerSig, nFeeRet, &coincontrol, sError))
+                throw JSONRPCError(RPC_WALLET_ERROR, sError);
             break;
         default:
             throw JSONRPCError(RPC_WALLET_ERROR, strprintf("Unknown input type: %d.", typeIn));
@@ -485,10 +574,12 @@ static UniValue SendToInner(const JSONRPCRequest &request, OutputTypes typeIn, O
         }
     }
 
+    int64_t nComputeTimeFinish = GetTimeMillis();
+
     CValidationState state;
     CReserveKey reservekey(wallet.get());
    // if (typeIn == OUTPUT_STANDARD && typeOut == OUTPUT_STANDARD) {
-        if (!wallet->CommitTransaction(wtx.tx, wtx.mapValue, wtx.vOrderForm, reservekey, g_connman.get(), state)) {
+        if (!wallet->CommitTransaction(wtx.tx, wtx.mapValue, wtx.vOrderForm, &reservekey, g_connman.get(), state, nComputeTimeFinish - nComputeTimeStart)) {
             throw JSONRPCError(RPC_WALLET_ERROR, strprintf("Transaction commit failed: %s", FormatStateMessage(state)));
         }
     //} else {
@@ -1056,7 +1147,7 @@ static UniValue createrawbasecointransaction(const JSONRPCRequest& request)
         amount.pushKV("value", ValueFromAmount(r.nAmount));
 
         if (r.nType == OUTPUT_CT || r.nType == OUTPUT_RINGCT) {
-            if (0 != pAnonWallet->AddCTData(txbout.get(), r, sError)) {
+            if (!pAnonWallet->AddCTData(txbout.get(), r, sError)) {
                 throw JSONRPCError(RPC_WALLET_ERROR, strprintf("AddCTData failed: %s.", sError));
             }
             amount.pushKV("nonce", r.nonce.ToString());
@@ -1497,7 +1588,7 @@ static UniValue fundrawtransactionfrom(const JSONRPCRequest& request)
     }
 
     for (const CTxIn& txin : tx.vin) {
-        coinControl.Select(txin.prevout);
+        coinControl.Select(txin.prevout, 0); //todo select amount
     }
 
     CTransactionRef tx_new;
@@ -1513,7 +1604,7 @@ static UniValue fundrawtransactionfrom(const JSONRPCRequest& request)
             }
         } else if (sInputType == "anon") {
             sError = "TODO";
-            //if (0 != pwallet->AddAnonInputs(wtx, rtx, vecSend, false, nFee, &coinControl, sError))
+            //if (!pwallet->AddAnonInputs(wtx, rtx, vecSend, false, nFee, &coinControl, sError))
             throw JSONRPCError(RPC_WALLET_ERROR, strprintf("AddAnonInputs failed: %s.", sError));
         } else if (sInputType == "blind") {
             if (0 != pAnonWallet->AddBlindedInputs(wtx, rtx, vecSend, false, nFee, &coinControl, sError)) {
@@ -1815,7 +1906,7 @@ static UniValue verifyrawtransaction(const JSONRPCRequest &request)
 
     if (!request.params[2].isNull() && request.params[2].get_bool()) {
         UniValue txn(UniValue::VOBJ);
-        TxToUniv(CTransaction(std::move(mtx)), uint256(), txn, false);
+        TxToUniv(CTransaction(std::move(mtx)), uint256(), {{}}, txn, false);
         result.pushKV("txn", txn);
     }
 
@@ -1832,7 +1923,9 @@ static const CRPCCommand commands[] =
         { //  category              name                                actor (function)                argNames
                 //  --------------------- ------------------------            -----------------------         ----------
                 { "wallet",             "getnewaddress",             &getnewaddress,          {"label","num_prefix_bits","prefix_num","bech32","makeV2"} },
-
+                { "wallet",             "restoreaddresses",          &restoreaddresses,          {"generate_count"} },
+                { "wallet",             "rescanringctwallet",          &rescanringctwallet,          {} },
+                { "wallet",             "getstealthchangeaddress",          &getstealthchangeaddress,          {} },
                 { "wallet",             "sendbasecointostealth", &sendbasecointostealth,               {"address","amount","comment","comment_to","subtractfeefromamount","narration"} },
 
                 { "wallet",             "sendstealthtobasecoin", &sendstealthtobasecoin,               {"address","amount","comment","comment_to","subtractfeefromamount","narration"} },
@@ -1853,7 +1946,7 @@ static const CRPCCommand commands[] =
 
 void RegisterHDWalletRPCCommands(CRPCTable &t)
 {
-    if (gArgs.GetBoolArg("-disablewallet", false))
+    if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET))
         return;
 
     for (unsigned int vcidx = 0; vcidx < ARRAYLEN(commands); vcidx++)

@@ -59,7 +59,12 @@ private Q_SLOTS:
     void updateWatchOnlyLabels(bool showWatchOnly);
     void handleOutOfSyncWarningClicks();
     void sortTxes(const QString& selectedStr);
+    void filterTxes(int selectedTxType);
     void onFaqClicked();
+    virtual void showEvent(QShowEvent *event) override;
+    virtual void hideEvent(QHideEvent *event) override;
+
+    void hideOrphans(bool fHide);
 };
 
 #endif // BITCOIN_QT_OVERVIEWPAGE_H

@@ -204,7 +204,7 @@ static int64_t AddTx(CWallet& wallet, uint32_t lockTime, int64_t mockTime, int64
     SetMockTime(mockTime);
     CBlockIndex* block = nullptr;
     if (blockTime > 0) {
-        LOCK(cs_main);
+        LOCK(cs_mapblockindex);
         auto inserted = mapBlockIndex.emplace(GetRandHash(), new CBlockIndex);
         assert(inserted.second);
         const uint256& hash = inserted.first->first;
@@ -297,7 +297,7 @@ public:
         CCoinControl dummy;
         BOOST_CHECK(wallet->CreateTransaction({recipient}, tx, reservekey, fee, changePos, error, dummy));
         CValidationState state;
-        BOOST_CHECK(wallet->CommitTransaction(tx, {}, {}, reservekey, nullptr, state));
+        BOOST_CHECK(wallet->CommitTransaction(tx, {}, {}, &reservekey, nullptr, state));
         CMutableTransaction blocktx;
         {
             LOCK(wallet->cs_wallet);

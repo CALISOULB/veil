@@ -13,6 +13,7 @@
 #include "validation.h"
 #include "consensus/validation.h"
 #include "shutdown.h"
+#include "boost/thread.hpp"
 
 using namespace libzerocoin;
 
@@ -251,8 +252,11 @@ void CzWallet::SyncWithChain(bool fGenerateMintPool)
                 }
 
                 CBlockIndex* pindex = nullptr;
-                if (mapBlockIndex.count(hashBlock))
-                    pindex = mapBlockIndex.at(hashBlock);
+                {
+                    LOCK(cs_mapblockindex);
+                    if (mapBlockIndex.count(hashBlock))
+                        pindex = mapBlockIndex.at(hashBlock);
+                }
 
                 if (!setAddedTx.count(txHash)) {
                     CBlock block;
@@ -280,6 +284,125 @@ void CzWallet::SyncWithChain(bool fGenerateMintPool)
             }
         }
     }
+}
+int *ThreadedDeterministicSearch_nProgress = nullptr;
+int ThreadedDeterministicSearch_nThreads = 0;
+int ThreadedDeterministicSearch_nCountStart = 0;
+int ThreadedDeterministicSearch_nCountEnd = 0;
+
+void CzWallet::ThreadedDeterministicSearch(int nCountStart, int nCountEnd, int nThreads)
+{
+    static boost::thread_group* searchThreads = nullptr;
+    int nCount = nCountStart;
+    int nRange = nCountEnd - nCountStart;
+
+    if (nThreads < 1) {
+        nThreads = 1;
+    }
+
+    if (searchThreads) {
+        searchThreads->interrupt_all();
+        delete searchThreads;
+        searchThreads = nullptr;
+    }
+
+    uiInterface.ShowProgress(_("Searching..."), 0, false); // show search progress in GUI as dialog or on splashscreen
+
+    if (ThreadedDeterministicSearch_nProgress) {
+        delete[] ThreadedDeterministicSearch_nProgress;
+        ThreadedDeterministicSearch_nProgress = nullptr;
+    }
+
+    ThreadedDeterministicSearch_nThreads = nThreads;
+    ThreadedDeterministicSearch_nProgress = new int[nThreads];
+    for (int i=0 ;i < ThreadedDeterministicSearch_nThreads; i++) {
+        ThreadedDeterministicSearch_nProgress[i] = 0;
+    }
+    ThreadedDeterministicSearch_nCountStart = nCountStart;
+    ThreadedDeterministicSearch_nCountEnd = nCountEnd;
+
+    searchThreads = new boost::thread_group();
+
+    int nRangePerThread = nRange / nThreads;
+
+    int nPrevThreadEnd = nCount - 1;
+    for (int i = 0; i < nThreads; i++) {
+        int nStart = nPrevThreadEnd + 1;;
+        int nEnd = std::min(nStart + nRangePerThread, nCountEnd);
+        nPrevThreadEnd = nEnd;
+        searchThreads->create_thread(std::bind(&CzWallet::DeterministicSearch, this, nStart, nEnd, &ThreadedDeterministicSearch_nProgress[i]));
+    }
+
+    searchThreads->join_all();
+
+    uiInterface.ShowProgress(_("Searching..."), 100, 0); // hide progress dialog in GUI
+}
+
+bool CzWallet::DeterministicSearch(int nCountStart, int nCountEnd, int* nThreadedProgress)
+{
+    LogPrintf("%s: start=%d end=%d\n", __func__, nCountStart, nCountEnd);
+    try {
+        double progress_begin;
+        double progress_end;
+        double progress_current;
+
+        if (nThreadedProgress == nullptr) {
+            progress_begin = nCountStart;
+            progress_end = nCountEnd;
+
+            uiInterface.ShowProgress(_("Searching..."), 0, false); // show search progress in GUI
+        }
+        else {
+            progress_begin = ThreadedDeterministicSearch_nCountStart;
+            progress_end = ThreadedDeterministicSearch_nCountEnd - ThreadedDeterministicSearch_nThreads;
+        }
+
+        CKey keyMaster;
+        if (!GetMasterSeed(keyMaster))
+            return false;
+
+        WalletBatch walletdb(*walletDatabase);
+
+        CKeyID hashSeed = keyMaster.GetPubKey().GetID();
+        for(int i = nCountStart; i < nCountEnd; i++) {
+            boost::this_thread::interruption_point();
+
+            CDataStream ss(SER_GETHASH, 0);
+            ss << keyMaster.GetPrivKey_256() << i;
+            uint512 zerocoinSeed = Hash512(ss.begin(), ss.end());
+
+            CBigNum bnValue;
+            CBigNum bnSerial;
+            CBigNum bnRandomness;
+            CKey key;
+            SeedToZerocoin(zerocoinSeed, bnValue, bnSerial, bnRandomness, key);
+
+            uint256 hashPubcoin = GetPubCoinHash(bnValue);
+            AddToMintPool(make_pair(hashPubcoin, i), true);
+            walletdb.WriteMintPoolPair(hashSeed, hashPubcoin, i);
+
+            if (nThreadedProgress == nullptr) {
+                progress_current = i;
+            } else {
+                // Calculate combined progress
+                progress_current = 0;
+                *nThreadedProgress = i - nCountStart + 1;
+                for (int i = 0; i < ThreadedDeterministicSearch_nThreads; i++) {
+                    progress_current += ThreadedDeterministicSearch_nProgress[i];
+                }
+            }
+
+            int percentageDone = std::max(1, std::min(99, (int)((progress_current - progress_begin) / (progress_end - progress_begin) * 100)));
+            uiInterface.ShowProgress(_("Searching..."), percentageDone, 0);
+        }
+        if (nThreadedProgress == nullptr) {
+            uiInterface.ShowProgress(_("Searching..."), 100, 0); // hide progress dialog in GUI
+        }
+    } catch (...) {
+        return error("%s: caught exception while running", __func__);
+    }
+
+    return true;
 }
 
 bool CzWallet::SetMintSeen(const CBigNum& bnValue, const int& nHeight, const uint256& txid, const CoinDenomination& denom)

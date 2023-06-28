@@ -13,6 +13,7 @@
 
 // TODO remove the following dependencies
 #include <chain.h>
+#include <chainparams.h>
 #include <coins.h>
 #include <utilmoneystr.h>
 #include <chainparams.h>
@@ -24,6 +25,7 @@
 #include <tinyformat.h>
 #include <libzerocoin/CoinSpend.h>
 #include <veil/zerocoin/zchain.h>
+#include <primitives/zerocoin.h>
 
 bool IsFinalTx(const CTransaction &tx, int nBlockHeight, int64_t nBlockTime)
 {
@@ -136,7 +138,7 @@ unsigned int GetP2SHSigOpCount(const CTransaction& tx, const CCoinsViewCache& in
     for (unsigned int i = 0; i < tx.vin.size(); i++) {
         if (tx.vin[i].IsAnonInput())
             continue;
-        if (tx.vin[i].scriptSig.IsZerocoinSpend())
+        if (tx.vin[i].IsZerocoinSpend())
             continue;
         const Coin& coin = inputs.AccessCoin(tx.vin[i].prevout);
         assert(!coin.IsSpent());
@@ -161,7 +163,7 @@ int64_t GetTransactionSigOpCost(const CTransaction& tx, const CCoinsViewCache& i
     for (unsigned int i = 0; i < tx.vin.size(); i++) {
         if (tx.vin[i].IsAnonInput())
             continue;
-        if (tx.vin[i].scriptSig.IsZerocoinSpend())
+        if (tx.vin[i].IsZerocoinSpend())
             continue;
         const Coin& coin = inputs.AccessCoin(tx.vin[i].prevout);
         assert(!coin.IsSpent());
@@ -197,7 +199,7 @@ bool CheckZerocoinSpend(const CTransaction& tx, CValidationState& state)
     CAmount nTotalRedeemed = 0;
     for (const CTxIn& txin : tx.vin) {
         //only check txin that is a zcspend
-        if (!txin.scriptSig.IsZerocoinSpend())
+        if (!txin.IsZerocoinSpend())
             continue;
 
         auto newSpend = TxInToZerocoinSpend(txin);
@@ -239,10 +241,15 @@ bool CheckZerocoinMint(const CTxOut& txout, CBigNum& bnValue, CValidationState& 
     if (!TxOutToPublicCoin(txout, pubCoin))
         return state.DoS(100, error("CheckZerocoinMint(): TxOutToPublicCoin() failed"));
 
-    if (!pubCoin.validate())
-        return state.DoS(100, error("CheckZerocoinMint() : PubCoin does not validate"));
-
     bnValue = pubCoin.getValue();
+    __attribute__((unused))
+        uint256 hashPubcoin = GetPubCoinHash(bnValue);
+
+    if (!fSkipZerocoinMintIsPrime) {
+        if (!pubCoin.validate())
+            return state.DoS(100, error("CheckZerocoinMint() : PubCoin does not validate"));
+    }
+
     return true;
 }
 
@@ -400,7 +407,7 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fSki
     std::set<uint256> setZerocoinSpendHashes;
     int nAnonIn = 0;
     for (const auto& txin : tx.vin) {
-        if (txin.scriptSig.IsZerocoinSpend()) {
+        if (txin.IsZerocoinSpend()) {
             //Veil: Cheap check here by hashing the entire script. This could be worked around, so still needs
             // a final full check in ConnectBlock()
             auto hashSpend = Hash(txin.scriptSig.begin(), txin.scriptSig.end());
@@ -421,7 +428,7 @@ bool CheckTransaction(const CTransaction& tx, CValidationState &state, bool fSki
         if (tx.vin[0].scriptSig.size() < 2 || tx.vin[0].scriptSig.size() > 100)
             return state.DoS(100, false, REJECT_INVALID, "bad-cb-length");
     } else if (tx.IsZerocoinSpend()) {
-        if (tx.vin.size() < 1 || static_cast<int>(tx.vin.size()) > Params().Zerocoin_MaxSpendsPerTransaction())
+        if (tx.vin.size() < 1 || tx.vin.size() > Params().Zerocoin_MaxSpendsPerTransaction())
             return state.DoS(10, error("CheckTransaction() : Zerocoin Spend has more than allowed txin's"),
                              REJECT_INVALID, "bad-zerocoinspend");
     } else {
@@ -457,13 +464,30 @@ bool Consensus::CheckTxInputs(const CTransaction& tx, CValidationState& state, c
     size_t nBasecoin = 0, nCt = 0, nRingCT = 0, nZerocoin = 0;
     nValueIn = 0;
     for (unsigned int i = 0; i < tx.vin.size(); ++i) {
+
+        uint32_t nInputs, nRingSize;
+        tx.vin[i].GetAnonInfo(nInputs, nRingSize);
+        const std::vector<uint8_t> &vKeyImages = tx.vin[i].scriptData.stack[0];
+
         if (tx.vin[i].IsAnonInput()) {
+            for (size_t k = 0; k < nInputs; ++k) {
+                const CCmpPubKey &ki = *((CCmpPubKey*)&vKeyImages[k*33]);
+
+                if (!state.m_setHaveKI.insert(ki).second) {
+                    if (::Params().CheckKIenforced(nSpendHeight))
+                        return state.DoS(100, false, REJECT_INVALID, "bad-anonin-dup-ki-tx-double");
+                    else
+                        LogPrint(BCLog::RINGCT, "%s: block=%d tx=%s spending ki: %s\n", __func__,
+                                 nSpendHeight, tx.GetHash().GetHex(), HexStr(ki).c_str());
+                }
+            }
+
             state.fHasAnonInput = true;
             nRingCT++;
             continue;
         }
 
-        if (tx.vin[i].scriptSig.IsZerocoinSpend()) {
+        if (tx.vin[i].IsZerocoinSpend()) {
             //Zerocoinspend uses nSequence as an easy reference to denomination
             CAmount nValue = tx.vin[i].nSequence & CTxIn::SEQUENCE_LOCKTIME_MASK;
             nValue *= COIN;

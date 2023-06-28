@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef ADDRESSESMENU_H
 #define ADDRESSESMENU_H
 
@@ -31,12 +35,14 @@ public:
     ~AddressesMenu();
 
 public Q_SLOTS:
-    virtual void showEvent(QShowEvent *event) override;
+	virtual void showEvent(QShowEvent *event) override;
+	virtual void enterEvent(QEvent *event) override;
+	virtual void leaveEvent(QEvent *event) override;
 
 private Q_SLOTS:
-    void on_btnCopyAddress_clicked();
-    void on_btnEditAddress_clicked();
-    void on_btnDeleteAddress_clicked();
+    void onBtnCopyAddressClicked();
+    void onBtnEditAddressClicked();
+    void onBtnDeleteAddressClicked();
 
 private:
     Ui::AddressesMenu *ui;
@@ -44,6 +50,7 @@ private:
     QModelIndex index;
     QString type;
     AddressTableModel *model;
+    QTimer *timeoutTimer;
 };
 
 #endif // ADDRESSESMENU_H

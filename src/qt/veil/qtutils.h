@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef QTUTILS_H
 #define QTUTILS_H
 
@@ -7,6 +11,8 @@
 #include <QAbstractAnimation>
 #include <QPoint>
 #include <QString>
+#include <QSettings>
+#include <QStandardPaths>
 #include <qt/bitcoingui.h>
 
 class BitcoinGUI;
@@ -17,6 +23,7 @@ void openDialogFullScreen(QWidget *parent, QWidget * dialog);
 bool openDialogWithOpaqueBackgroundY(QDialog *widget, BitcoinGUI *gui, double posX = 3, int posY = 5);
 bool openDialogWithOpaqueBackground(QDialog *widget, BitcoinGUI *gui, double posX = 3);
 void openDialogWithOpaqueBackgroundFullScreen(QDialog *widget, BitcoinGUI *gui);
+QSettings* getSettings();
 
 
 void openToastDialog(QString text, QWidget *gui);

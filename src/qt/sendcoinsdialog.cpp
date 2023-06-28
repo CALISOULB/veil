@@ -1,4 +1,5 @@
 // Copyright (c) 2011-2019 The Bitcoin Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -13,6 +14,7 @@
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
 #include <qt/sendcoinsentry.h>
+#include <QtConcurrent/QtConcurrent>
 
 #include <qt/veil/sendconfirmation.h>
 
@@ -29,6 +31,9 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QTextDocument>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
+#include <QPixmap>
 #include <veil/dandelioninventory.h>
 
 #include <qt/veil/qtutils.h>
@@ -64,6 +69,10 @@ SendCoinsDialog::SendCoinsDialog(const PlatformStyle *_platformStyle, QWidget *p
     platformStyle(_platformStyle)
 {
     ui->setupUi(this);
+    m_prepareData = nullptr;
+    m_statusAnimationState = 0;
+    m_timerStatus = new QTimer(this);
+    connect(m_timerStatus, SIGNAL(timeout()), this, SLOT(StatusTimerTimeout()));
 
     setStyleSheet(GUIUtil::loadStyleSheet());
 
@@ -85,6 +94,7 @@ SendCoinsDialog::SendCoinsDialog(const PlatformStyle *_platformStyle, QWidget *p
 
     connect(ui->addButton, SIGNAL(clicked()), this, SLOT(addEntry()));
     connect(ui->clearButton, SIGNAL(clicked()), this, SLOT(clear()));
+    connect(this, SIGNAL(TransactionPrepared()), this, SLOT(PrepareTransactionFinished()));
 
     // Coin Control
     connect(ui->pushButtonCoinControl, SIGNAL(clicked()), this, SLOT(coinControlButtonClicked()));
@@ -120,6 +130,11 @@ SendCoinsDialog::SendCoinsDialog(const PlatformStyle *_platformStyle, QWidget *p
     if (!settings.contains("fPayOnlyMinFee"))
         settings.setValue("fPayOnlyMinFee", false);
     minimizeFeeSection(settings.value("fFeeSectionMinimized").toBool());
+
+    //Hide all coincontrol labels
+    HideCoinControlLabels();
+
+    SetTransactionLabelState(TxPrepState::BEGIN);
 }
 
 void SendCoinsDialog::setClientModel(ClientModel *_clientModel)
@@ -153,10 +168,10 @@ void SendCoinsDialog::setModel(WalletModel *_model)
         updateDisplayUnit();
 
         // Coin Control
-//        connect(_model->getOptionsModel(), SIGNAL(displayUnitChanged(int)), this, SLOT(coinControlUpdateLabels()));
-//        connect(_model->getOptionsModel(), SIGNAL(coinControlFeaturesChanged(bool)), this, SLOT(coinControlFeatureChanged(bool)));
+        connect(_model->getOptionsModel(), SIGNAL(displayUnitChanged(int)), this, SLOT(coinControlUpdateLabels()));
+        connect(_model->getOptionsModel(), SIGNAL(coinControlFeaturesChanged(bool)), this, SLOT(coinControlFeatureChanged(bool)));
 //        ui->frameCoinControl->setVisible(_model->getOptionsModel()->getCoinControlFeatures());
-//        coinControlUpdateLabels();
+        coinControlUpdateLabels();
 
         // fee section
         //connect(ui->optInRBF, SIGNAL(stateChanged(int)), this, SLOT(updateSmartFeeLabel()));
@@ -197,76 +212,120 @@ SendCoinsDialog::~SendCoinsDialog()
     delete ui;
 }
 
-void SendCoinsDialog::on_sendButton_clicked()
+void SendCoinsDialog::HideCoinControlLabels()
 {
-    if(!model || !model->getOptionsModel())
-        return;
+    ui->horizontalSpacer_2->changeSize(1,1, QSizePolicy::Expanding, QSizePolicy::Fixed);
+    ui->labelCoinControlBytes->hide();
+    ui->labelCoinControlBytesText->hide();
+    ui->labelCoinControlQuantity->hide();
+    ui->labelCoinControlQuantityText->hide();
+    ui->labelCoinControlAmount->hide();
+    ui->labelCoinControlAmountText->hide();
+    ui->labelCoinControlLowOutput->hide();
+    ui->labelCoinControlLowOutputText->hide();
+    ui->labelCoinControlFee->hide();
+    ui->labelCoinControlFeeText->hide();
+    ui->labelCoinControlAfterFee->hide();
+    ui->labelCoinControlAfterFeeText->hide();
+    ui->labelCoinControlChange->hide();
+    ui->labelCoinControlChangeText->hide();
+}
 
-    QList<SendCoinsRecipient> recipients;
-    bool valid = true;
+void SendCoinsDialog::ShowCoinCointrolLabels()
+{
+    ui->horizontalSpacer_2->changeSize(0,0, QSizePolicy::Fixed, QSizePolicy::Fixed);
+    ui->labelCoinControlBytes->show();
+    ui->labelCoinControlBytesText->show();
+    ui->labelCoinControlQuantity->show();
+    ui->labelCoinControlQuantityText->show();
+    ui->labelCoinControlAmount->show();
+    ui->labelCoinControlAmountText->show();
+    ui->labelCoinControlLowOutput->show();
+    ui->labelCoinControlLowOutputText->show();
+    ui->labelCoinControlFee->show();
+    ui->labelCoinControlFeeText->show();
+    ui->labelCoinControlAfterFee->show();
+    ui->labelCoinControlAfterFeeText->show();
+    ui->labelCoinControlChange->show();
+    ui->labelCoinControlChangeText->show();
+}
 
-    std::string error;
-    for(int i = 0; i < ui->entries->count(); ++i)
-    {
-        SendCoinsEntry *entry = qobject_cast<SendCoinsEntry*>(ui->entries->itemAt(i)->widget());
-        if(entry) {
-            if(entry->validate(model->node(), error)) {
-                recipients.append(entry->getValue());
-            }
-            else {
-                valid = false;
-            }
-        }
+void SendCoinsDialog::StatusTimerTimeout()
+{
+    if (m_statusAnimationState < 3) {
+        //Add another dot
+        auto text = ui->labelCreationStatus->text();
+        text.push_back(".");
+        ui->labelCreationStatus->setText(text);
+        m_statusAnimationState++;
+    } else {
+        //Remove all dots
+        ui->labelCreationStatus->setText(tr("Generating Transaction"));
+        m_statusAnimationState = 0;
     }
+}
 
-    if(!valid){
-        openToastDialog(QString::fromStdString("Invalid data\n" + error), this);
-        return;
+void SendCoinsDialog::SetTransactionLabelState(TxPrepState state)
+{
+    QPalette palette = ui->labelCreationStatus->palette();
+    m_timerStatus->stop();
+    switch (state) {
+        case TxPrepState::BEGIN:
+        case TxPrepState::DONE:
+            ui->labelCreationStatus->setHidden(true);
+            ui->sendButton->setEnabled(true);
+            break;
+        case TxPrepState::GENERATING:
+            ui->labelCreationStatus->setHidden(false);
+            ui->labelCreationStatus->setText(tr("Generating Transaction"));
+            palette.setColor(ui->labelCreationStatus->foregroundRole(), QColor(204,0,0)); //red
+            ui->labelCreationStatus->setPalette(palette);
+
+            //start timer that adds "..." to the label to give some animation
+            m_timerStatus->start(500);
+
+            //While a tx is generating, disable send button
+            ui->sendButton->setEnabled(false);
+            break;
+        case TxPrepState::WAITING_USER:
+            ui->labelCreationStatus->setHidden(false);
+            ui->labelCreationStatus->setText(tr("Waiting For User"));
+            palette.setColor(ui->labelCreationStatus->foregroundRole(), QColor(0,102,0)); //green
+            ui->labelCreationStatus->setPalette(palette);
+            break;
     }
+}
 
-    if(recipients.isEmpty()){
-        openToastDialog("No recipients", this);
-        return;
-    }
+void SendCoinsDialog::PrepareTransaction()
+{
+    m_prepareData->prepareStatus = model->prepareTransaction(*m_prepareData->tx, m_prepareData->ctrl, m_prepareData->spendType, m_prepareData->receipt, m_prepareData->vCommitData);
+    Q_EMIT TransactionPrepared();
+}
 
-    fNewRecipientAllowed = false;
-    WalletModel::UnlockContext ctx(model->requestUnlock());
-    if(!ctx.isValid())
-    {
-        // Unlock wallet was cancelled
-        fNewRecipientAllowed = true;
-        return;
-    }
+void SendCoinsDialog::PrepareTransactionFinished()
+{
+    SetTransactionLabelState(TxPrepState::WAITING_USER);
 
-    // prepare transaction for getting txFee earlier
-    WalletModelTransaction currentTransaction(recipients);
-    WalletModel::SendCoinsReturn prepareStatus;
-
-    // Always use a CCoinControl instance, use the CoinControlDialog instance if CoinControl has been enabled
-    CCoinControl ctrl;
-    if (model->getOptionsModel()->getCoinControlFeatures())
-        ctrl = *CoinControlDialog::coinControl();
-
-    updateCoinControlState(ctrl);
-
-    prepareStatus = model->prepareTransaction(currentTransaction, ctrl);
     // process prepareStatus and on error generate message shown to user
-    processSendCoinsReturn(prepareStatus,
-        BitcoinUnits::formatWithUnit(model->getOptionsModel()->getDisplayUnit(), currentTransaction.getTransactionFee()));
+    processSendCoinsReturn(m_prepareData->prepareStatus,
+                           BitcoinUnits::formatWithUnit(model->getOptionsModel()->getDisplayUnit(), m_prepareData->tx->getTransactionFee()));
 
-    if(prepareStatus.status != WalletModel::OK) {
+    if (m_prepareData->prepareStatus.status != WalletModel::OK) {
         fNewRecipientAllowed = true;
+        SetTransactionLabelState(TxPrepState::DONE);
         return;
     }
 
-    CAmount txFee = currentTransaction.getTransactionFee();
+    CAmount txFee = m_prepareData->tx->getTransactionFee();
+
+    int64_t nComputeTimeFinish = GetTimeMillis();
 
     // Format confirmation message
     QStringList formatted;
     QStringList formattedAddresses;
 
-    bool isOne = currentTransaction.getRecipients().size() == 1;
-    for (const SendCoinsRecipient &rcp : currentTransaction.getRecipients())
+    bool isOne = m_prepareData->tx->getRecipients().size() == 1;
+    for (const SendCoinsRecipient &rcp : m_prepareData->tx->getRecipients())
     {
         // generate bold amount string with wallet name in case of multiwallet
         QString amount = "<b align=right>" + BitcoinUnits::formatHtmlWithUnit(model->getOptionsModel()->getDisplayUnit(), rcp.amount);
@@ -324,7 +383,7 @@ void SendCoinsDialog::on_sendButton_clicked()
         questionString.append("</b>");
 
         // append transaction size
-        questionString.append(" (" + QString::number((double)currentTransaction.getTransactionSize() / 1000) + " kB): ");
+        questionString.append(" (" + QString::number((double)m_prepareData->tx->getTransactionSize() / 1000) + " kB): ");
 
         // append transaction fee value
         questionString.append("<span style='color:#aa0000; font-weight:bold;'>");
@@ -336,14 +395,14 @@ void SendCoinsDialog::on_sendButton_clicked()
         //if (ui->optInRBF->isChecked()) {
         //    questionString.append(tr("You can increase the fee later (signals Replace-By-Fee, BIP-125)."));
         //} else {
-            questionString.append(tr("Not signalling Replace-By-Fee, BIP-125."));
+        questionString.append(tr("Not signalling Replace-By-Fee, BIP-125."));
         //}
         questionString.append("</span>");
     }
 
     // add total amount in all subdivision units
     questionString.append("<hr />");
-    CAmount totalAmount = currentTransaction.getTotalTransactionAmount() + txFee;
+    CAmount totalAmount = m_prepareData->tx->getTotalTransactionAmount() + txFee;
     QStringList alternativeUnits;
     for (BitcoinUnits::Unit u : BitcoinUnits::availableUnits())
     {
@@ -351,10 +410,9 @@ void SendCoinsDialog::on_sendButton_clicked()
             alternativeUnits.append(BitcoinUnits::formatHtmlWithUnit(u, totalAmount));
     }
     questionString.append(QString("<b>%1</b>: <b>%2</b>").arg(tr("Total Amount"))
-        .arg(BitcoinUnits::formatHtmlWithUnit(model->getOptionsModel()->getDisplayUnit(), totalAmount)));
+                                  .arg(BitcoinUnits::formatHtmlWithUnit(model->getOptionsModel()->getDisplayUnit(), totalAmount)));
     questionString.append(QString("<br /><span style='font-size:10pt; font-weight:normal;'>(=%1)</span>")
-        .arg(alternativeUnits.join(" " + tr("or") + " ")));
-
+                                  .arg(alternativeUnits.join(" " + tr("or") + " ")));
 
     // TODO: Connect confirm dialog..
     int unit = model->getOptionsModel()->getDisplayUnit();
@@ -370,11 +428,16 @@ void SendCoinsDialog::on_sendButton_clicked()
 
     if(!res){
         fNewRecipientAllowed = true;
+        SetTransactionLabelState(TxPrepState::DONE);
         return;
     }
 
     // now send the prepared transaction
-    WalletModel::SendCoinsReturn sendStatus = model->sendCoins(currentTransaction);
+    WalletModel::SendCoinsReturn sendStatus;
+    if (m_prepareData->spendType == ZCSPEND)
+        sendStatus = model->sendZerocoins(m_prepareData->receipt, m_prepareData->vCommitData, nComputeTimeFinish - m_prepareData->nComputeTimeStart);
+    if (sendStatus.status == WalletModel::OK)
+        sendStatus = model->sendCoins(*m_prepareData->tx, m_prepareData->spendType == ZCSPEND);
     // process sendStatus and on error generate message shown to user
     processSendCoinsReturn(sendStatus);
 
@@ -383,7 +446,7 @@ void SendCoinsDialog::on_sendButton_clicked()
         accept();
         CoinControlDialog::coinControl()->UnSelectAll();
         coinControlUpdateLabels();
-        uint256 hashCurrentTx = currentTransaction.getWtx()->get().GetHash();
+        uint256 hashCurrentTx = m_prepareData->tx->getWtx()->get().GetHash();
         if (fDandelion) {
             LOCK(veil::dandelion.cs);
             veil::dandelion.Add(hashCurrentTx, GetAdjustedTime() + veil::dandelion.nDefaultStemTime, veil::dandelion.nDefaultNodeID);
@@ -391,6 +454,63 @@ void SendCoinsDialog::on_sendButton_clicked()
         Q_EMIT coinsSent(hashCurrentTx);
     }
     fNewRecipientAllowed = true;
+    SetTransactionLabelState(TxPrepState::DONE);
+}
+
+void SendCoinsDialog::on_sendButton_clicked()
+{
+    if(!model || !model->getOptionsModel())
+        return;
+
+    QList<SendCoinsRecipient> recipients;
+    bool valid = true;
+
+    std::string error;
+    for(int i = 0; i < ui->entries->count(); ++i)
+    {
+        SendCoinsEntry *entry = qobject_cast<SendCoinsEntry*>(ui->entries->itemAt(i)->widget());
+        if(entry) {
+            if(entry->validate(model->node(), error)) {
+                recipients.append(entry->getValue());
+            }
+            else {
+                valid = false;
+            }
+        }
+    }
+
+    if (!valid) {
+        openToastDialog(QString::fromStdString("Invalid data\n" + error), this->mainWindow->getGUI());
+        return;
+    }
+
+    fNewRecipientAllowed = false;
+    WalletModel::UnlockContext ctx(model->requestUnlock());
+    if(!ctx.isValid())
+    {
+        // Unlock wallet was cancelled
+        fNewRecipientAllowed = true;
+        return;
+    }
+
+    m_prepareData.reset(new PrepareTxData());
+    m_prepareData->nComputeTimeStart = GetTimeMillis();
+    m_prepareData->tx = new WalletModelTransaction(recipients);
+
+    // Always use a CCoinControl instance, use the CoinControlDialog instance if CoinControl has been enabled
+    CCoinControl ctrl;
+    if (model->getOptionsModel()->getCoinControlFeatures())
+        ctrl = *CoinControlDialog::coinControl();
+
+    m_prepareData->ctrl = ctrl;
+    updateCoinControlState(ctrl);
+    QtConcurrent::run(this, &SendCoinsDialog::PrepareTransaction);
+
+    //Show a message box that says transaction is being generated
+    SetTransactionLabelState(TxPrepState::GENERATING);
+    QMessageBox::information(this, tr("Transaction Is Being Generated"),
+            tr("The transaction is now being generated. A confirmation window will pop up when the transaction is ready to be sent."),
+            QMessageBox::Ok);
 }
 
 void SendCoinsDialog::clear()
@@ -591,6 +711,9 @@ void SendCoinsDialog::processSendCoinsReturn(const WalletModel::SendCoinsReturn 
         msgParams.first = tr("Payment request expired.");
         msgParams.second = CClientUIInterface::MSG_ERROR;
         break;
+    case WalletModel::ZerocoinSpendFail:
+        msgParams.first = tr("Zerocoinspend transaction failed. ") + msgParams.first;
+        break;
     // included to prevent a compiler warning.
     case WalletModel::OK:
     default:
@@ -770,9 +893,13 @@ void SendCoinsDialog::coinControlFeatureChanged(bool checked)
 // Coin Control: button inputs -> show actual coin control dialog
 void SendCoinsDialog::coinControlButtonClicked()
 {
-    CoinControlDialog dlg(platformStyle);
-    dlg.setModel(model);
-    dlg.exec();
+    mainWindow->getGUI()->showHide(true);
+
+    CoinControlDialog *dlg = new CoinControlDialog(platformStyle);
+    dlg->setModel(model);
+
+    openDialogWithOpaqueBackground(dlg, mainWindow->getGUI(), 4);
+
     coinControlUpdateLabels();
 }
 
@@ -848,6 +975,7 @@ void SendCoinsDialog::coinControlChangeEdited(const QString& text)
 // Coin Control: update labels
 void SendCoinsDialog::coinControlUpdateLabels()
 {
+
     if (!model || !model->getOptionsModel())
         return;
 
@@ -871,15 +999,16 @@ void SendCoinsDialog::coinControlUpdateLabels()
 
     if (CoinControlDialog::coinControl()->HasSelected())
     {
-        // actual coin control calculation
-//        CoinControlDialog::updateLabels(model, this);
 
-        // show coin control stats
-        //ui->labelCoinControlAutomaticallySelected->hide();
-        //ui->widgetCoinControl->show();
+        // actual coin control calculation
+        CoinControlDialog::updateLabels(model, this);
+
+        // Show coin control stats
+        ShowCoinCointrolLabels();
     }
     else
     {
+        HideCoinControlLabels();
         // hide coin control stats
         //ui->labelCoinControlAutomaticallySelected->show();
         //ui->widgetCoinControl->hide();
@@ -896,6 +1025,28 @@ void SendCoinsDialog::toggleDandelion(bool fchecked)
                 tr("Dandelion protocol is in beta. Any communications of this transaction may be inconsistent."));
     }
     fDandelion = fchecked;
+}
+
+void SendCoinsDialog::showEvent(QShowEvent *event){
+    QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(this);
+    this->setGraphicsEffect(eff);
+    QPropertyAnimation *a = new QPropertyAnimation(eff,"opacity");
+    a->setDuration(100);
+    a->setStartValue(0.25);
+    a->setEndValue(1);
+    a->setEasingCurve(QEasingCurve::InBack);
+    a->start(QPropertyAnimation::DeleteWhenStopped);
+}
+
+ void SendCoinsDialog::hideEvent(QHideEvent *event){
+    QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(this);
+    this->setGraphicsEffect(eff);
+    QPropertyAnimation *a = new QPropertyAnimation(eff,"opacity");
+    a->setDuration(100);
+    a->setStartValue(1);
+    a->setEndValue(0);
+    a->setEasingCurve(QEasingCurve::OutBack);
+    a->start(QPropertyAnimation::DeleteWhenStopped);
 }
 
 SendConfirmationDialog::SendConfirmationDialog(const QString &title, const QString &text, int _secDelay,

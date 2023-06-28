@@ -21,6 +21,8 @@
 #include <uint256.h>
 #include <util.h>
 
+#include <algorithm>
+
 #include <QColor>
 #include <QDateTime>
 #include <QDebug>
@@ -96,9 +98,9 @@ public:
         qDebug() << "TransactionTablePriv::updateWallet: " + QString::fromStdString(hash.ToString()) + " " + QString::number(status);
 
         // Find bounds of this transaction in model
-        QList<TransactionRecord>::iterator lower = qLowerBound(
+        QList<TransactionRecord>::iterator lower = std::lower_bound(
             cachedWallet.begin(), cachedWallet.end(), hash, TxLessThan());
-        QList<TransactionRecord>::iterator upper = qUpperBound(
+        QList<TransactionRecord>::iterator upper = std::upper_bound(
             cachedWallet.begin(), cachedWallet.end(), hash, TxLessThan());
         int lowerIndex = (lower - cachedWallet.begin());
         int upperIndex = (upper - cachedWallet.begin());
@@ -655,6 +657,8 @@ QVariant TransactionTableModel::data(const QModelIndex &index, int role) const
         return walletModel->getAddressTableModel()->labelForAddress(QString::fromStdString(rec->address));
     case AmountRole:
         return qint64(rec->credit + rec->debit);
+    case FeeRole:
+        return "Fee " + ( rec->getFee() == 0 ? "0.00 VEIL" : BitcoinUnits::formatWithUnit(BitcoinUnits::VEIL, rec->getFee(), false, BitcoinUnits::separatorAlways)) ;
     case TxHashRole:
         return rec->getTxHash();
     case TxHexRole:
@@ -815,8 +819,8 @@ static void ShowProgress(TransactionTableModel *ttm, const std::string &title, i
 void TransactionTableModel::subscribeToCoreSignals()
 {
     // Connect signals to wallet
-    m_handler_transaction_changed = walletModel->wallet().handleTransactionChanged(boost::bind(NotifyTransactionChanged, this, _1, _2));
-    m_handler_show_progress = walletModel->wallet().handleShowProgress(boost::bind(ShowProgress, this, _1, _2));
+    m_handler_transaction_changed = walletModel->wallet().handleTransactionChanged(std::bind(NotifyTransactionChanged, this, std::placeholders::_1, std::placeholders::_2));
+    m_handler_show_progress = walletModel->wallet().handleShowProgress(std::bind(ShowProgress, this, std::placeholders::_1, std::placeholders::_2));
 }
 
 void TransactionTableModel::unsubscribeFromCoreSignals()

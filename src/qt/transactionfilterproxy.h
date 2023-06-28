@@ -51,6 +51,11 @@ public:
 
     int rowCount(const QModelIndex &parent = QModelIndex()) const;
 
+    void setHideOrphans(bool hide);
+    bool orphansHidden() const { return fHideOrphans; }
+
+
+
 protected:
     bool filterAcceptsRow(int source_row, const QModelIndex & source_parent) const;
 
@@ -63,6 +68,9 @@ private:
     CAmount minAmount;
     int limitRows;
     bool showInactive;
+    bool fHideOrphans;
+
+    bool isOrphan(const int status, const int type) const;
 };
 
 #endif // BITCOIN_QT_TRANSACTIONFILTERPROXY_H

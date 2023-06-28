@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/balance.h>
 #include <qt/veil/forms/ui_balance.h>
 
@@ -29,8 +33,8 @@ Q_DECLARE_METATYPE(interfaces::WalletBalances)
 
 Balance::Balance(QWidget *parent, BitcoinGUI* gui) :
     QWidget(parent),
-    mainWindow(gui),
-    ui(new Ui::Balance)
+    ui(new Ui::Balance),
+    mainWindow(gui)
 {
     ui->setupUi(this);
     m_balances.total_balance = -1;
@@ -44,11 +48,27 @@ Balance::Balance(QWidget *parent, BitcoinGUI* gui) :
 //    ui->copyAddress->setIcon(ButtonIcon);
 //    ui->copyAddress->setIconSize(QSize(20, 20));
 
+    ui->btnBalance->installEventFilter(this);
+    ui->btnUnconfirmed->installEventFilter(this);
+    ui->btnImmature->installEventFilter(this);
+
     connect(ui->btnBalance, SIGNAL(clicked()), this, SLOT(onBtnBalanceClicked()));
     connect(ui->btnUnconfirmed, SIGNAL(clicked()), this, SLOT(onBtnUnconfirmedClicked()));
     connect(ui->btnImmature, SIGNAL(clicked()), this, SLOT(onBtnImmatureClicked()));
-    connect(ui->copyAddress, SIGNAL(clicked()), this, SLOT(on_btnCopyAddress_clicked()));
+    connect(ui->copyAddress, SIGNAL(clicked()), this, SLOT(onBtnCopyAddressClicked()));
 
+}
+
+bool Balance::eventFilter(QObject *obj, QEvent *event) {
+    if (obj == ui->btnBalance || obj == ui->btnUnconfirmed || obj == ui->btnImmature) {
+        if (event->type() == QEvent::Leave) {
+            if (tooltip && tooltip->isVisible()) {
+                tooltip->hide();
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(obj, event);;
 }
 
 Balance::~Balance()
@@ -69,7 +89,7 @@ void Balance::onBtnImmatureClicked() {
 }
 
 
-void Balance::on_btnCopyAddress_clicked() {
+void Balance::onBtnCopyAddressClicked() {
     GUIUtil::setClipboard(qAddress);
     openToastDialog("Address copied", mainWindow);
 }
@@ -109,7 +129,7 @@ void Balance::onBtnBalanceClicked(int type){
             thirdBalance = balances.basecoin_balance;
             widget = ui->btnBalance;
             posy = 0;
-            posx = widget->pos().rx()+150;
+            posx = widget->pos().rx()+190;
            break;
         case 1:
             firstTitle = QString::fromStdString("Zerocoin");
@@ -211,39 +231,50 @@ void Balance::updateDisplayUnit()
 void Balance::refreshWalletStatus() {
     // Check wallet status
     interfaces::Wallet& wallet = walletModel->wallet();
-    bool isLocked = walletModel->getEncryptionStatus() == WalletModel::Locked;
     std::string strAddress;
-    std::vector<interfaces::WalletAddress> addresses = wallet.getLabelAddress("stealth");
-    if(isLocked || !addresses.empty()) {
-        interfaces::WalletAddress address = addresses[0];
-        if (address.dest.type() == typeid(CStealthAddress)){
+    std::string addressName = " ";
+    isminetype isMine = ISMINE_NO;
+    std::string purpose = " ";
+
+    if (displayAddressSet) {
+        bool doesAddyExist = wallet.getAddress(currentDisplayAddress, &addressName, &isMine, &purpose);
+        strAddress = EncodeDestination(currentDisplayAddress, !("receive_miner" == purpose));
+    } else {
+        std::vector<interfaces::WalletAddress> addresses = wallet.getLabelAddress("stealth");
+        if(!addresses.empty()) {
+            interfaces::WalletAddress address = addresses[0];
+            if (address.dest.type() == typeid(CStealthAddress)){
+                bool fBech32 = true;
+                strAddress = EncodeDestination(address.dest,true);
+                addressName = "stealth";
+            }
+        }else {
+            ui->copyAddress->setVisible(true);
+            ui->labelReceive->setAlignment(Qt::AlignLeft);
+            ui->labelReceive->setText("Receiving address");
+            // Generate a new address to associate with given label
+            // TODO: Use only one stealth address here.
+            CStealthAddress address;
+            if (!walletModel->wallet().getNewStealthAddress(address)) {
+                ui->labelQr->setText("");
+                ui->copyAddress->setVisible(false);
+                ui->labelReceive->setText("Wallet Locked");
+                ui->labelReceive->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+                ui->labelAddress->setText("");
+                return;
+            }
             bool fBech32 = true;
-            strAddress = EncodeDestination(address.dest,true);
+            strAddress = address.ToString(fBech32);
+            wallet.setAddressBook(DecodeDestination(strAddress), "stealth", "receive", fBech32);
+            addressName = "stealth"; 
         }
-    }else {
-        ui->copyAddress->setVisible(true);
-        ui->labelReceive->setAlignment(Qt::AlignLeft);
-        ui->labelReceive->setText("Receiving address");
-        // Generate a new address to associate with given label
-        // TODO: Use only one stealth address here.
-        CStealthAddress address;
-        if (!walletModel->wallet().getNewStealthAddress(address)) {
-            ui->labelQr->setText("");
-            ui->copyAddress->setVisible(false);
-            ui->labelReceive->setText("Wallet Locked");
-            ui->labelReceive->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
-            ui->labelAddress->setText("");
-            return;
-        }
-        bool fBech32 = true;
-        strAddress = address.ToString(fBech32);
-        wallet.setAddressBook(DecodeDestination(strAddress), "stealth", "receive", fBech32);
     }
 
     qAddress = QString::fromStdString(strAddress);
 
     // set address
     ui->labelAddress->setText(qAddress.left(12) + "..." + qAddress.right(12));
+    ui->labelAddressName->setText(QString::fromStdString(addressName));
 
     SendCoinsRecipient info;
     info.address = qAddress;
@@ -301,4 +332,7 @@ void Balance::refreshWalletStatus() {
 #endif
 }
 
-
+void Balance::setDisplayRcvAddress(CTxDestination *displayAddress) {
+    displayAddressSet = true;
+    currentDisplayAddress = *displayAddress;
+}

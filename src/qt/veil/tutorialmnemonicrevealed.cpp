@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/tutorialmnemonicrevealed.h>
 #include <qt/veil/forms/ui_tutorialmnemonicrevealed.h>
 
@@ -13,8 +17,8 @@ QString editLineInvalidCss = "QLineEdit{border-bottom:1px solid red;background-c
 
 TutorialMnemonicRevealed::TutorialMnemonicRevealed(QStringList _wordList, QWidget *parent) :
     QWidget(parent),
-    wordList(_wordList),
-    ui(new Ui::TutorialMnemonicRevealed)
+    ui(new Ui::TutorialMnemonicRevealed),
+    wordList(_wordList)
 {
     ui->setupUi(this);
 

@@ -1,3 +1,4 @@
+// Copyright (c) 2019 Veil developers
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
 // Distributed under the MIT software license, see the accompanying
@@ -36,6 +37,10 @@ void WalletInit::AddWalletOptions() const
     gArgs.AddArg("-keypool=<n>", strprintf("Set key pool size to <n> (default: %u)", DEFAULT_KEYPOOL_SIZE), false, OptionsCategory::WALLET);
     gArgs.AddArg("-mintxfee=<amt>", strprintf("Fees (in %s/kB) smaller than this are considered zero fee for transaction creation (default: %s)",
                                                             CURRENCY_UNIT, FormatMoney(DEFAULT_TRANSACTION_MINFEE)), false, OptionsCategory::WALLET);
+    // default denom
+    gArgs.AddArg("-nautomintdenom=<n>", strprintf("Set preferred automint denomination (default: %d)", DEFAULT_AUTOMINT_DENOM), false, OptionsCategory::WALLET);
+    gArgs.AddArg("-automintoff", strprintf("Disable automint (default: %u)", false), false, OptionsCategory::WALLET);
+
     gArgs.AddArg("-paytxfee=<amt>", strprintf("Fee (in %s/kB) to add to transactions you send (default: %s)",
                                                             CURRENCY_UNIT, FormatMoney(CFeeRate{DEFAULT_PAY_TX_FEE}.GetFeePerK())), false, OptionsCategory::WALLET);
     gArgs.AddArg("-rescan", "Rescan the block chain for missing wallet transactions on startup", false, OptionsCategory::WALLET);
@@ -60,6 +65,14 @@ void WalletInit::AddWalletOptions() const
 
     gArgs.AddArg("-gen=<n>", strprintf("Enable CPU mining to true on the given number of threads (default: %u)", 0), false, OptionsCategory::WALLET);
     gArgs.AddArg("-genoverride", strprintf("Allows you to override the IsInitialBlockDownload check in BitcoinMiner for PoW mining (default: %u)", false), false, OptionsCategory::HIDDEN);
+    gArgs.AddArg("-mine=<algo>", strprintf("Mine blocks using the selected algorithm. options are randomx|progpow|sha256d (default: %s)", "randomx"), false, OptionsCategory::WALLET);
+    gArgs.AddArg("-miningaddress=<address>", strprintf("When getblocktemplate is called. It will create the coinbase transaction using this address(default: empty string)"), false, OptionsCategory::WALLET);
+
+    gArgs.AddArg("-autospend", strprintf("Enable to wallet to start trying to auto spend zerocoin to an address this wallet controls (default: %u)", false), false, OptionsCategory::WALLET);
+    gArgs.AddArg("-autospendcount=<n>", strprintf("The selected number between 1 - 3 that the wallet will try to auto spend (default: %d)", 1), false, OptionsCategory::WALLET);
+    gArgs.AddArg("-autospenddenom=<n>", strprintf("The selected denomination (10, 100, 1000, 10000) to try and auto spend (default: %d)", 10), false, OptionsCategory::WALLET);
+    gArgs.AddArg("-autospendaddress=<address>", strprintf("The selected destination address used for auto spend. If one isn't given, a new address will be created by the wallet, and will be saved to use until it is changed"), false, OptionsCategory::WALLET);
+
 }
 
 bool WalletInit::ParameterInteraction() const
@@ -68,6 +81,8 @@ bool WalletInit::ParameterInteraction() const
         for (const std::string& wallet : gArgs.GetArgs("-wallet")) {
             LogPrintf("%s: parameter interaction: -disablewallet -> ignoring -wallet=%s\n", __func__, wallet);
         }
+        if (gArgs.SoftSetBoolArg("-staking", false))
+            LogPrintf("%s: parameter interaction: -disablewallet -> disabeling staking\n", __func__);
 
         return true;
     }
@@ -212,8 +227,8 @@ bool WalletInit::Open() const
         pwallet->setZPivAutoBackups(fEnableZPivBackups);
 
         AddWallet(pwallet);
-        pwallet->getZWallet()->LoadMintPoolFromDB();
-        pwallet->getZWallet()->SyncWithChain();
+        pwallet->GetZWallet()->LoadMintPoolFromDB();
+        pwallet->GetZWallet()->SyncWithChain();
     }
 
     return true;
@@ -221,6 +236,11 @@ bool WalletInit::Open() const
 
 void WalletInit::Start(CScheduler& scheduler) const
 {
+    if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        LogPrintf("Wallet disabled!\n");
+        return;
+    }
+
     for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
         pwallet->postInitProcess();
     }
@@ -231,6 +251,11 @@ void WalletInit::Start(CScheduler& scheduler) const
 
 void WalletInit::Flush() const
 {
+    if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        LogPrintf("Wallet disabled!\n");
+        return;
+    }
+
     for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
         pwallet->Flush(false);
     }
@@ -238,6 +263,11 @@ void WalletInit::Flush() const
 
 void WalletInit::Stop() const
 {
+    if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        LogPrintf("Wallet disabled!\n");
+        return;
+    }
+
     for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
         pwallet->Flush(true);
     }
@@ -245,6 +275,11 @@ void WalletInit::Stop() const
 
 void WalletInit::Close() const
 {
+    if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        LogPrintf("Wallet disabled!\n");
+        return;
+    }
+
     for (const std::shared_ptr<CWallet>& pwallet : GetWallets()) {
         RemoveWallet(pwallet);
     }

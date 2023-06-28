@@ -1,7 +1,7 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
 // Copyright (c) 2015-2019 The PIVX developers
-// Copyright (c) 2018-2019 The Veil developers
+// Copyright (c) 2018-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -14,6 +14,7 @@
 #include <addrman.h>
 #include <amount.h>
 #include <veil/ringct/blind.h>
+#include <veil/ringct/stealth.h>
 #include <chain.h>
 #include <chainparams.h>
 #include <checkpoints.h>
@@ -52,7 +53,9 @@
 #include <walletinitinterface.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <veil/invalid.h>
 #include <veil/ringct/anon.h>
+#include <veil/zerocoin/zchain.h>
 
 #ifndef WIN32
 #include <signal.h>
@@ -61,13 +64,14 @@
 #ifdef ENABLE_WALLET
 #include <veil/ringct/anonwallet.h>
 #include "wallet/wallet.h"
+#include "pow.h"
+
 #endif
 
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <boost/filesystem.hpp>
-#include <boost/bind.hpp>
 #include <boost/interprocess/sync/file_lock.hpp>
 #include <boost/thread.hpp>
 #include <openssl/crypto.h>
@@ -85,6 +89,7 @@ static const bool DEFAULT_STOPAFTERBLOCKIMPORT = false;
 std::unique_ptr<CConnman> g_connman;
 std::unique_ptr<PeerLogicValidation> peerLogic;
 
+/*
 #if !(ENABLE_WALLET)
 class DummyWalletInit : public WalletInitInterface {
 public:
@@ -112,6 +117,7 @@ void DummyWalletInit::AddWalletOptions() const
 //const WalletInitInterface& g_wallet_init_interface = DummyWalletInit();
 #endif
 
+*/
 #ifdef WIN32
 // Win32 LevelDB doesn't use filedescriptors, and the ones used for
 // accessing block files don't count towards the fd_set size limit
@@ -177,8 +183,13 @@ static std::unique_ptr<CCoinsViewErrorCatcher> pcoinscatcher;
 static std::unique_ptr<ECCVerifyHandle> globalVerifyHandle;
 
 static boost::thread_group threadGroup;
+#ifdef ENABLE_WALLET
 static boost::thread_group threadGroupStaking;
+static boost::thread_group threadGroupPrecompute;
+static boost::thread_group threadGroupAutoSpend;
+#endif
 static boost::thread_group threadGroupPoWMining;
+static boost::thread_group threadGroupRandomX;
 static boost::thread_group threadGroupStaging;
 static CScheduler scheduler;
 
@@ -216,7 +227,9 @@ void Shutdown()
     StopREST();
     StopRPC();
     StopHTTPServer();
+#ifdef ENABLE_WALLET
     g_wallet_init_interface.Flush();
+#endif
     StopMapPort();
 
     // Because these depend on each-other, we make sure that neither can be
@@ -231,8 +244,21 @@ void Shutdown()
     // CScheduler/checkqueue threadGroup
     threadGroupPoWMining.interrupt_all();
     threadGroupPoWMining.join_all();
-    threadGroupStaking.interrupt_all();
-    threadGroupStaking.join_all();
+    DeallocateVMVector();
+    DeallocateDataSet();
+
+    threadGroupRandomX.interrupt_all();
+    threadGroupRandomX.join_all();
+#ifdef ENABLE_WALLET
+    if(!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)){
+        threadGroupStaking.interrupt_all();
+        threadGroupStaking.join_all();
+        threadGroupPrecompute.interrupt_all();
+        threadGroupPrecompute.join_all();
+        threadGroupAutoSpend.interrupt_all();
+        threadGroupAutoSpend.join_all();
+    }
+#endif
     threadGroupStaging.interrupt_all();
     threadGroupStaging.join_all();
     threadGroup.interrupt_all();
@@ -286,7 +312,11 @@ void Shutdown()
         pblocktree.reset();
         pzerocoinDB.reset();
     }
+
+    DeallocateRandomXLightCache();
+#ifdef ENABLE_WALLET
     g_wallet_init_interface.Stop();
+#endif
 
 #if ENABLE_ZMQ
     if (g_zmq_notification_interface) {
@@ -306,7 +336,9 @@ void Shutdown()
     UnregisterAllValidationInterfaces();
     GetMainSignals().UnregisterBackgroundSignalScheduler();
     GetMainSignals().UnregisterWithMempoolSignals(mempool);
+#ifdef ENABLE_WALLET
     g_wallet_init_interface.Close();
+#endif
     globalVerifyHandle.reset();
     ECC_Stop();
     ECC_Stop_Stealth();
@@ -366,8 +398,10 @@ void SetupServerArgs()
 {
     const auto defaultBaseParams = CreateBaseChainParams(CBaseChainParams::MAIN);
     const auto testnetBaseParams = CreateBaseChainParams(CBaseChainParams::TESTNET);
+    const auto devnetBaseParams = CreateBaseChainParams(CBaseChainParams::DEVNET);
     const auto defaultChainParams = CreateChainParams(CBaseChainParams::MAIN);
     const auto testnetChainParams = CreateChainParams(CBaseChainParams::TESTNET);
+    const auto devnetChainParams = CreateChainParams(CBaseChainParams::DEVNET);
 
     // Hidden Options
     std::vector<std::string> hidden_args = {"-rpcssl", "-benchmark", "-h", "-help", "-socks", "-tor", "-debugnet", "-whitelistalwaysrelay",
@@ -380,7 +414,7 @@ void SetupServerArgs()
     gArgs.AddArg("-?", "Print this help message and exit", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-version", "Print version and exit", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-alertnotify=<cmd>", "Execute command when a relevant alert is received or we see a really long fork (%s in cmd is replaced by message)", false, OptionsCategory::OPTIONS);
-    gArgs.AddArg("-assumevalid=<hex>", strprintf("If this block is in the chain assume that it and its ancestors are valid and potentially skip their script verification (0 to verify all, default: %s, testnet: %s)", defaultChainParams->GetConsensus().defaultAssumeValid.GetHex(), testnetChainParams->GetConsensus().defaultAssumeValid.GetHex()), false, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-assumevalid=<hex>", strprintf("If this block is in the chain assume that it and its ancestors are valid and potentially skip their script verification (0 to verify all, default: %s, testnet: %s, devnet: %s)", defaultChainParams->GetConsensus().defaultAssumeValid.GetHex(), testnetChainParams->GetConsensus().defaultAssumeValid.GetHex(), devnetChainParams->GetConsensus().defaultAssumeValid.GetHex()), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-blocksdir=<dir>", "Specify blocks directory (default: <datadir>/blocks)", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-blocknotify=<cmd>", "Execute command when the best block changes (%s in cmd is replaced by block hash)", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-blockreconstructionextratxn=<n>", strprintf("Extra transactions to keep in memory for compact block reconstructions (default: %u)", DEFAULT_BLOCK_RECONSTRUCTION_EXTRA_TXN), false, OptionsCategory::OPTIONS);
@@ -397,7 +431,7 @@ void SetupServerArgs()
     gArgs.AddArg("-maxreorg=<n>", strprintf("Specify the maximum reorganization depth (default: %u)", DEFAULT_MAX_REORG_DEPTH), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-maxorphantx=<n>", strprintf("Keep at most <n> unconnectable transactions in memory (default: %u)", DEFAULT_MAX_ORPHAN_TRANSACTIONS), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-mempoolexpiry=<n>", strprintf("Do not keep transactions in the mempool longer than <n> hours (default: %u)", DEFAULT_MEMPOOL_EXPIRY), false, OptionsCategory::OPTIONS);
-    gArgs.AddArg("-minimumchainwork=<hex>", strprintf("Minimum work assumed to exist on a valid chain in hex (default: %s, testnet: %s)", defaultChainParams->GetConsensus().nMinimumChainWork.GetHex(), testnetChainParams->GetConsensus().nMinimumChainWork.GetHex()), true, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-minimumchainwork=<hex>", strprintf("Minimum work assumed to exist on a valid chain in hex (default: %s, testnet: %s, devnet: %s)", defaultChainParams->GetConsensus().nMinimumChainWork.GetHex(), testnetChainParams->GetConsensus().nMinimumChainWork.GetHex(), devnetChainParams->GetConsensus().nMinimumChainWork.GetHex()), true, OptionsCategory::OPTIONS);
     gArgs.AddArg("-par=<n>", strprintf("Set the number of script verification threads (%u to %d, 0 = auto, <0 = leave that many cores free, default: %d)",
         -GetNumCores(), MAX_SCRIPTCHECK_THREADS, DEFAULT_SCRIPTCHECK_THREADS), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-persistmempool", strprintf("Whether to save the mempool on shutdown and load on restart (default: %u)", DEFAULT_PERSIST_MEMPOOL), false, OptionsCategory::OPTIONS);
@@ -411,6 +445,7 @@ void SetupServerArgs()
             "(default: 0 = disable pruning blocks, 1 = allow manual pruning via RPC, >=%u = automatically prune block files to stay under the specified target size in MiB)", MIN_DISK_SPACE_FOR_BLOCK_FILES / 1024 / 1024), false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-reindex", "Rebuild chain state and block index from the blk*.dat files on disk", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-reindex-chainstate", "Rebuild chain state from the currently indexed blocks", false, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-reindex-zdb", "Rebuild Zerocoin blockchain database", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-resync", "Delete blockchain folders and resync from scratch", false, OptionsCategory::OPTIONS);
 #ifndef WIN32
     gArgs.AddArg("-sysperms", "Create new files with system default permissions, instead of umask 077 (only effective with disabled wallet functionality)", false, OptionsCategory::OPTIONS);
@@ -418,6 +453,7 @@ void SetupServerArgs()
     hidden_args.emplace_back("-sysperms");
 #endif
     gArgs.AddArg("-txindex", strprintf("Maintain a full transaction index, used by the getrawtransaction rpc call (default: %u)", DEFAULT_TXINDEX), false, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-threadbatchverify", strprintf("How many threads to run when batch verifying zeroknowledge proofs (default: %u)", DEFAULT_BATCHVERIFY_THREADS), false, OptionsCategory::OPTIONS);
 
     gArgs.AddArg("-addnode=<ip>", "Add a node to connect to and attempt to keep the connection open (see the `addnode` RPC command help for more info). This option can be specified multiple times to add multiple nodes.", false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-banscore=<n>", strprintf("Threshold for disconnecting misbehaving peers (default: %u)", DEFAULT_BANSCORE_THRESHOLD), false, OptionsCategory::CONNECTION);
@@ -428,7 +464,7 @@ void SetupServerArgs()
     gArgs.AddArg("-dns", strprintf("Allow DNS lookups for -addnode, -seednode and -connect (default: %u)", DEFAULT_NAME_LOOKUP), false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-dnsseed", "Query for peer addresses via DNS lookup, if low on addresses (default: 1 unless -connect used)", false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-enablebip61", strprintf("Send reject messages per BIP61 (default: %u)", DEFAULT_ENABLE_BIP61), false, OptionsCategory::CONNECTION);
-    gArgs.AddArg("-exchangesandservicesmode", "Opt out of staking, zerocoin automint, and dandelion (default: 0)", false, OptionsCategory::OPTIONS);
+    gArgs.AddArg("-exchangesandservicesmode", "Opt out of staking, zerocoin automint, and Dandelion (default: 0)", false, OptionsCategory::OPTIONS);
     gArgs.AddArg("-externalip=<ip>", "Specify your own public address", false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-forcednsseed", strprintf("Always query for peer addresses via DNS lookup (default: %u)", DEFAULT_FORCEDNSSEED), false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-listen", "Accept connections from outside (default: 1 if no -proxy or -connect)", false, OptionsCategory::CONNECTION);
@@ -442,7 +478,7 @@ void SetupServerArgs()
     gArgs.AddArg("-onlynet=<net>", "Make outgoing connections only through network <net> (ipv4, ipv6 or onion). Incoming connections are not affected by this option. This option can be specified multiple times to allow multiple networks.", false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-peerbloomfilters", strprintf("Support filtering of blocks and transaction with bloom filters (default: %u)", DEFAULT_PEERBLOOMFILTERS), false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-permitbaremultisig", strprintf("Relay non-P2SH multisig (default: %u)", DEFAULT_PERMIT_BAREMULTISIG), false, OptionsCategory::CONNECTION);
-    gArgs.AddArg("-port=<port>", strprintf("Listen for connections on <port> (default: %u or testnet: %u)", defaultChainParams->GetDefaultPort(), testnetChainParams->GetDefaultPort()), false, OptionsCategory::CONNECTION);
+    gArgs.AddArg("-port=<port>", strprintf("Listen for connections on <port> (default: %u, testnet: %u or devnet: %u)", defaultChainParams->GetDefaultPort(), testnetChainParams->GetDefaultPort(), devnetChainParams->GetDefaultPort()), false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-proxy=<ip:port>", "Connect through SOCKS5 proxy, set -noproxy to disable (default: disabled)", false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-proxyrandomize", strprintf("Randomize credentials for every proxy connection. This enables Tor stream isolation (default: %u)", DEFAULT_PROXYRANDOMIZE), false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-seednode=<ip>", "Connect to a node to retrieve peer addresses, and disconnect. This option can be specified multiple times to connect to multiple nodes.", false, OptionsCategory::CONNECTION);
@@ -461,8 +497,9 @@ void SetupServerArgs()
     gArgs.AddArg("-whitebind=<addr>", "Bind to given address and whitelist peers connecting to it. Use [host]:port notation for IPv6", false, OptionsCategory::CONNECTION);
     gArgs.AddArg("-whitelist=<IP address or network>", "Whitelist peers connecting from the given IP address (e.g. 1.2.3.4) or CIDR notated network (e.g. 1.2.3.0/24). Can be specified multiple times."
         " Whitelisted peers cannot be DoS banned and their transactions are always relayed, even if they are already in the mempool, useful e.g. for a gateway", false, OptionsCategory::CONNECTION);
-
+#ifdef ENABLE_WALLET
     g_wallet_init_interface.AddWalletOptions();
+#endif
 
 #if ENABLE_ZMQ
     gArgs.AddArg("-zmqpubhashblock=<address>", "Enable publish hash block in <address>", false, OptionsCategory::ZMQ);
@@ -510,7 +547,7 @@ void SetupServerArgs()
 
     SetupChainParamsBaseOptions();
 
-    gArgs.AddArg("-acceptnonstdtxn", strprintf("Relay and mine \"non-standard\" transactions (%sdefault: %u)", "testnet/regtest only; ", !testnetChainParams->RequireStandard()), true, OptionsCategory::NODE_RELAY);
+    gArgs.AddArg("-acceptnonstdtxn", strprintf("Relay and mine \"non-standard\" transactions (%sdefault: %u)", "testnet/regtest/devnet only; ", !testnetChainParams->RequireStandard() || !devnetChainParams->RequireStandard()), true, OptionsCategory::NODE_RELAY);
     gArgs.AddArg("-incrementalrelayfee=<amt>", strprintf("Fee rate (in %s/kB) used to define cost of relay, used for mempool limiting and BIP 125 replacement. (default: %s)", CURRENCY_UNIT, FormatMoney(DEFAULT_INCREMENTAL_RELAY_FEE)), true, OptionsCategory::NODE_RELAY);
     gArgs.AddArg("-dustrelayfee=<amt>", strprintf("Fee rate (in %s/kB) used to defined dust, the value of an output such that it will cost more than its value in fees at this fee rate to spend it. (default: %s)", CURRENCY_UNIT, FormatMoney(DUST_RELAY_TX_FEE)), true, OptionsCategory::NODE_RELAY);
     gArgs.AddArg("-bytespersigop", strprintf("Equivalent bytes per sigop in transactions for relay and mining (default: %u)", DEFAULT_BYTES_PER_SIGOP), false, OptionsCategory::NODE_RELAY);
@@ -522,7 +559,6 @@ void SetupServerArgs()
     gArgs.AddArg("-whitelistforcerelay", strprintf("Force relay of transactions from whitelisted peers even if they violate local relay policy (default: %d)", DEFAULT_WHITELISTFORCERELAY), false, OptionsCategory::NODE_RELAY);
     gArgs.AddArg("-whitelistrelay", strprintf("Accept relayed transactions received from whitelisted peers even when not relaying transactions (default: %d)", DEFAULT_WHITELISTRELAY), false, OptionsCategory::NODE_RELAY);
 
-
     gArgs.AddArg("-blockmaxweight=<n>", strprintf("Set maximum BIP141 block weight (default: %d)", DEFAULT_BLOCK_MAX_WEIGHT), false, OptionsCategory::BLOCK_CREATION);
     gArgs.AddArg("-blockmintxfee=<amt>", strprintf("Set lowest fee rate (in %s/kB) for transactions to be included in block creation. (default: %s)", CURRENCY_UNIT, FormatMoney(DEFAULT_BLOCK_MIN_TX_FEE)), false, OptionsCategory::BLOCK_CREATION);
     gArgs.AddArg("-blockversion=<n>", "Override block version to test forking scenarios", true, OptionsCategory::BLOCK_CREATION);
@@ -533,7 +569,7 @@ void SetupServerArgs()
     gArgs.AddArg("-rpcbind=<addr>[:port]", "Bind to given address to listen for JSON-RPC connections. This option is ignored unless -rpcallowip is also passed. Port is optional and overrides -rpcport. Use [host]:port notation for IPv6. This option can be specified multiple times (default: 127.0.0.1 and ::1 i.e., localhost, or if -rpcallowip has been specified, 0.0.0.0 and :: i.e., all addresses)", false, OptionsCategory::RPC);
     gArgs.AddArg("-rpccookiefile=<loc>", "Location of the auth cookie. Relative paths will be prefixed by a net-specific datadir location. (default: data dir)", false, OptionsCategory::RPC);
     gArgs.AddArg("-rpcpassword=<pw>", "Password for JSON-RPC connections", false, OptionsCategory::RPC);
-    gArgs.AddArg("-rpcport=<port>", strprintf("Listen for JSON-RPC connections on <port> (default: %u or testnet: %u)", defaultBaseParams->RPCPort(), testnetBaseParams->RPCPort()), false, OptionsCategory::RPC);
+    gArgs.AddArg("-rpcport=<port>", strprintf("Listen for JSON-RPC connections on <port> (default: %u, testnet: %u or devnet: %u)", defaultBaseParams->RPCPort(), testnetBaseParams->RPCPort(), devnetBaseParams->RPCPort()), false, OptionsCategory::RPC);
     gArgs.AddArg("-rpcserialversion", strprintf("Sets the serialization of raw transaction or block hex returned in non-verbose mode, non-segwit(0) or segwit(1) (default: %d)", DEFAULT_RPC_SERIALIZE_VERSION), false, OptionsCategory::RPC);
     gArgs.AddArg("-rpcservertimeout=<n>", strprintf("Timeout during HTTP requests (default: %d)", DEFAULT_HTTP_SERVER_TIMEOUT), true, OptionsCategory::RPC);
     gArgs.AddArg("-rpcthreads=<n>", strprintf("Set the number of threads to service RPC calls (default: %d)", DEFAULT_HTTP_THREADS), false, OptionsCategory::RPC);
@@ -556,11 +592,10 @@ std::string LicenseInfo()
     const std::string URL_SOURCE_CODE = "<https://github.com/veil-project/veil>";
     const std::string URL_WEBSITE = "<https://veil-project.com>";
 
-    return  CopyrightHolders(strprintf(_("Copyright (C) %i-%i"), 2009, COPYRIGHT_YEAR) + " ") + "\n" +
-            "Copyright (C) 2009-2019 The Bitcoin Core developers" + "\n"
-            "Copyright (C) 2015-2019 PIVX Developers" + "\n" +
+    return  std::string("Copyright (C) 2009-2019 The Bitcoin Core developers") + "\n"
+            "Copyright (C) 2015-2019 The PIVX Developers" + "\n" +
             "Copyright (C) 2017-2019 The Particl Developers" + "\n" +
-            "Copyright (C) 2018-2019 Veil Developers" + "\n" +
+            CopyrightHolders(strprintf(_("Copyright (C) %i-%i "), 2018, COPYRIGHT_YEAR)) + "\n" +
            "\n" +
            strprintf(_("Please contribute if you find %s useful. "
                        "Visit %s for further information about the software."),
@@ -681,6 +716,10 @@ static void ThreadImport(std::vector<fs::path> vImportFiles)
                 break; // This error is logged in OpenBlockFile
             LogPrintf("Reindexing block file blk%05u.dat...\n", (unsigned int)nFile);
             LoadExternalBlockFile(chainparams, file, &pos);
+            if (ShutdownRequested()) {
+                LogPrintf("Shutdown requested. Exit %s\n", __func__);
+                return;
+            }
             nFile++;
         }
         pblocktree->WriteReindexing(false);
@@ -698,6 +737,10 @@ static void ThreadImport(std::vector<fs::path> vImportFiles)
             fs::path pathBootstrapOld = GetDataDir() / "bootstrap.dat.old";
             LogPrintf("Importing bootstrap.dat...\n");
             LoadExternalBlockFile(chainparams, file);
+            if (ShutdownRequested()) {
+                LogPrintf("Shutdown requested. Exit %s\n", __func__);
+                return;
+            }
             RenameOver(pathBootstrap, pathBootstrapOld);
         } else {
             LogPrintf("Warning: Could not open bootstrap file %s\n", pathBootstrap.string());
@@ -710,6 +753,10 @@ static void ThreadImport(std::vector<fs::path> vImportFiles)
         if (file) {
             LogPrintf("Importing blocks file %s...\n", path.string());
             LoadExternalBlockFile(chainparams, file);
+            if (ShutdownRequested()) {
+                LogPrintf("Shutdown requested. Exit %s\n", __func__);
+                return;
+            }
         } else {
             LogPrintf("Warning: Could not open blocks file %s\n", path.string());
         }
@@ -722,6 +769,8 @@ static void ThreadImport(std::vector<fs::path> vImportFiles)
         StartShutdown();
         return;
     }
+
+    fReindexChainState = false;
 
     if (gArgs.GetBoolArg("-stopafterblockimport", DEFAULT_STOPAFTERBLOCKIMPORT)) {
         LogPrintf("Stopping after block import\n");
@@ -963,7 +1012,7 @@ bool AppInitParameterInteraction()
     // if using block pruning, then disallow txindex
     if (gArgs.GetArg("-prune", 0)) {
         if (gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX))
-            return InitError(_("Prune mode is incompatible with -txindex."));
+            InitWarning(_("Ignoring Prune Mode: Incompatible with -txindex."));
     }
 
     // -bind and -whitebind can't be set when not listening
@@ -1086,6 +1135,10 @@ bool AppInitParameterInteraction()
     if (nPruneArg < 0) {
         return InitError(_("Prune cannot be configured with a negative value."));
     }
+    if (nPruneArg && gArgs.GetBoolArg("-txindex", DEFAULT_TXINDEX)) {
+        // We already warned them that it's getting ignored
+        nPruneArg = 0;
+    }
     nPruneTarget = (uint64_t) nPruneArg * 1024 * 1024;
     if (nPruneArg == 1) {  // manual pruning: -prune=1
         LogPrintf("Block pruning enabled.  Use RPC call pruneblockchain(height) to manually prune block and undo files.\n");
@@ -1139,8 +1192,9 @@ bool AppInitParameterInteraction()
     if (chainparams.RequireStandard() && !fRequireStandard)
         return InitError(strprintf("acceptnonstdtxn is not currently supported for %s chain", chainparams.NetworkIDString()));
     nBytesPerSigOp = gArgs.GetArg("-bytespersigop", nBytesPerSigOp);
-
+#ifdef ENABLE_WALLET
     if (!g_wallet_init_interface.ParameterInteraction()) return false;
+#endif
 
     fIsBareMultisigStd = gArgs.GetBoolArg("-permitbaremultisig", DEFAULT_PERMIT_BAREMULTISIG);
     fAcceptDatacarrier = gArgs.GetBoolArg("-datacarrier", DEFAULT_ACCEPT_DATACARRIER);
@@ -1300,8 +1354,8 @@ bool AppInitMain()
     }
 
     // Start the lightweight task scheduler thread
-    CScheduler::Function serviceLoop = boost::bind(&CScheduler::serviceQueue, &scheduler);
-    threadGroup.create_thread(boost::bind(&TraceThread<CScheduler::Function>, "scheduler", serviceLoop));
+    CScheduler::Function serviceLoop = std::bind(&CScheduler::serviceQueue, &scheduler);
+    threadGroup.create_thread(std::bind(&TraceThread<CScheduler::Function>, "scheduler", serviceLoop));
 
     GetMainSignals().RegisterBackgroundSignalScheduler(scheduler);
     GetMainSignals().RegisterWithMempoolSignals(mempool);
@@ -1310,10 +1364,12 @@ bool AppInitMain()
      * available in the GUI RPC console even if external calls are disabled.
      */
     RegisterAllCoreRPCCommands(tableRPC);
-    g_wallet_init_interface.RegisterRPC(tableRPC);
-
 #ifdef ENABLE_WALLET
-    RegisterHDWalletRPCCommands(tableRPC);
+    if(!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)){
+        g_wallet_init_interface.RegisterRPC(tableRPC);
+
+        RegisterHDWalletRPCCommands(tableRPC);
+    }
 #endif
 
 #if ENABLE_ZMQ
@@ -1333,7 +1389,9 @@ bool AppInitMain()
     }
 
     // ********************************************************* Step 5: verify wallet database integrity
+#ifdef ENABLE_WALLET
     if (!g_wallet_init_interface.Verify()) return false;
+#endif
 
     // ********************************************************* Step 6: network initialization
     // Note that we absolutely cannot open any actual connections
@@ -1487,7 +1545,7 @@ bool AppInitMain()
     }
 
     fReindex = gArgs.GetBoolArg("-reindex", false);
-    bool fReindexChainState = gArgs.GetBoolArg("-reindex-chainstate", false);
+    fReindexChainState = gArgs.GetBoolArg("-reindex-chainstate", false);
     fEnableZeromint = !gArgs.GetBoolArg("-exchangesandservicesmode", false);
 
     // cache size calculations
@@ -1517,6 +1575,8 @@ bool AppInitMain()
         std::string strLoadError;
 
         uiInterface.InitMessage(_("Loading block index..."));
+
+        blacklist::InitializeBlacklist();
 
         LOCK(cs_main);
 
@@ -1554,10 +1614,13 @@ bool AppInitMain()
                     break;
                 }
 
-                // If the loaded chain has a wrong genesis, bail out immediately
-                // (we're likely using a testnet datadir, or the other way around).
-                if (!mapBlockIndex.empty() && !LookupBlockIndex(chainparams.GetConsensus().hashGenesisBlock)) {
-                    return InitError(_("Incorrect or no genesis block found. Wrong datadir for network?"));
+                {
+                    LOCK(cs_mapblockindex);
+                    // If the loaded chain has a wrong genesis, bail out immediately
+                    // (we're likely using a testnet datadir, or the other way around).
+                    if (!mapBlockIndex.empty() && !LookupBlockIndex(chainparams.GetConsensus().hashGenesisBlock)) {
+                        return InitError(_("Incorrect or no genesis block found. Wrong datadir for network?"));
+                    }
                 }
 
                 // Check for changed -prune state.  What we are concerned about is a user who has pruned blocks
@@ -1634,10 +1697,20 @@ bool AppInitMain()
                                 "Only rebuild the block database if you are sure that your computer's date and time are correct");
                         break;
                     }
-
+                    fVerifying = true;
                     if (!CVerifyDB().VerifyDB(chainparams, pcoinsdbview.get(), gArgs.GetArg("-checklevel", DEFAULT_CHECKLEVEL),
                                   gArgs.GetArg("-checkblocks", DEFAULT_CHECKBLOCKS))) {
                         strLoadError = _("Corrupted block database detected");
+                        fVerifying = false;
+                        break;
+                    }
+                    fVerifying = false;
+                }
+
+                if (gArgs.GetBoolArg("-reindex-zdb", false)) {
+                    std::string strRet = ReindexZerocoinDB();
+                    if (strRet != "") {
+                        strLoadError = _(strRet.c_str());
                         break;
                     }
                 }
@@ -1693,7 +1766,20 @@ bool AppInitMain()
     }
 
     // ********************************************************* Step 9: load wallet
+#ifdef ENABLE_WALLET
     if (!g_wallet_init_interface.Open()) return false;
+#endif
+
+
+    // Automint denom
+    if(gArgs.IsArgSet("-nautomintdenom")){
+        nPreferredDenom = gArgs.GetArg("-nautomintdenom", DEFAULT_AUTOMINT_DENOM);
+        if(nPreferredDenom != 10 && nPreferredDenom != 100 && nPreferredDenom != 1000 && nPreferredDenom != 10000){
+        	LogPrintf("Invalid -nautomintdenom value set: %d. Defaulting to : %d\n", nPreferredDenom, DEFAULT_AUTOMINT_DENOM);
+            nPreferredDenom = DEFAULT_AUTOMINT_DENOM;
+        }
+    }
+
 
     // ********************************************************* Step 10: data directory maintenance
 
@@ -1744,7 +1830,7 @@ bool AppInitMain()
         vImportFiles.push_back(strFile);
     }
 
-    threadGroup.create_thread(boost::bind(&ThreadImport, vImportFiles));
+    threadGroup.create_thread(std::bind(&ThreadImport, vImportFiles));
 
     // Wait for genesis block to be processed
     {
@@ -1764,14 +1850,12 @@ bool AppInitMain()
 
     // ********************************************************* Step 12: start node
 
-    int chain_active_height;
-
     //// debug print
     {
-        LOCK(cs_main);
+        LOCK(cs_mapblockindex);
         LogPrintf("mapBlockIndex.size() = %u\n", mapBlockIndex.size());
-        chain_active_height = chainActive.Height();
     }
+    int chain_active_height = chainActive.Height();
     LogPrintf("nBestHeight = %d\n", chain_active_height);
 
     if (gArgs.GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION))
@@ -1845,40 +1929,83 @@ bool AppInitMain()
     SetRPCWarmupFinished();
     uiInterface.InitMessage(_("Done loading"));
 
-    g_wallet_init_interface.Start(scheduler);
-
-    //Start staking thread last
-    if (gArgs.GetBoolArg("-staking", true) && !gArgs.GetBoolArg("-exchangesandservicesmode", false))
-        threadGroupStaking.create_thread(&ThreadStakeMiner);
-
     //Start block staging thread
-    threadGroupStaging.create_thread(&ThreadStaging);
+    threadGroupStaging.create_thread(&ThreadStagingBlockProcessing);
+    //threadGroupStaging.create_thread(&ThreadStagingBatchVerify);
 
     LinkPoWThreadGroup(&threadGroupPoWMining);
+    LinkRandomXThreadGroup(&threadGroupRandomX);
 
-    // Start wallet CPU mining if the -gen=<n> parameter is given
-    int nThreads = gArgs.GetArg("-gen", 0);
-    if (nThreads) {
-        auto pt = GetMainWallet();
-        if (pt) {
-            std::shared_ptr<CReserveScript> coinbase_script;
-            pt->GetScriptForMining(coinbase_script);
+#ifdef ENABLE_WALLET
+    if(!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)){
+        g_wallet_init_interface.Start(scheduler);
 
-            // If the keypool is exhausted, no script is returned at all.  Catch this.
-            if (!coinbase_script) {
-                error("Failed to start veilminer: Keypool ran out, please call keypoolrefill first");
-                return true;
+        //Start staking thread last
+        if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET) && gArgs.GetBoolArg("-staking", true) && !gArgs.GetBoolArg("-exchangesandservicesmode", false))
+            threadGroupStaking.create_thread(&ThreadStakeMiner);
+
+        // Link thread groups
+        LinkAutoSpendThreadGroup(&threadGroupAutoSpend);
+
+        // Validate wallet mining address.
+        std::string sAddress = gArgs.GetArg("-miningaddress", "");
+        if (!sAddress.empty()) {
+            CTxDestination dest = DecodeDestination(sAddress);
+
+            auto pt = GetMainWallet();
+            if (pt && pt->IsMine(dest) != ISMINE_SPENDABLE) {
+                return InitError(strprintf(_("Invalid -miningaddress: '%s' not owned by wallet"), sAddress));
+            }
+        }
+
+        // Start wallet CPU mining if the -gen=<n> parameter is given
+        int nThreads = gArgs.GetArg("-gen", 0);
+        if (nThreads) {
+            bool fSkip = false;
+            auto pt = GetMainWallet();
+            if (pt) {
+                std::shared_ptr<CReserveScript> coinbase_script;
+                pt->GetScriptForMining(coinbase_script);
+
+                // If the keypool is exhausted, no script is returned at all.  Catch this.
+                if (!coinbase_script) {
+                    error("Failed to start veilminer: Keypool ran out, please call keypoolrefill first");
+                    fSkip = true;
+                }
+
+                //throw an error if no script was provided
+                if (coinbase_script->reserveScript.empty()) {
+                    error("Failed to start veilminer: No coinbase script available");
+                    fSkip = true;
+                }
+
+                if (!fSkip)
+                    GenerateBitcoins(true, nThreads, coinbase_script);
+            }
+        }
+
+        if (gArgs.GetBoolArg("-autospend", false)) {
+            int nNumberToSpend = gArgs.GetArg("-autospendcount", 3);
+            int nDenomToSpend = gArgs.GetArg("-autospenddenom", 10);
+            std::string strAutoSpendAddress = gArgs.GetArg("-autospendaddress", "");
+
+            if (!strAutoSpendAddress.empty()) {
+                CTxDestination destination;
+                CBitcoinAddress addr(strAutoSpendAddress);
+                destination = addr.Get();
+
+                if (!addr.IsValidStealthAddress()) {
+                    return InitError(strprintf(_("Invalid stealth address with -autospendaddress: '%s'"), strAutoSpendAddress));
+                }
             }
 
-            //throw an error if no script was provided
-            if (coinbase_script->reserveScript.empty()) {
-                error("Failed to start veilminer: No coinbase script available");
-                return true;
-            }
-
-            GenerateBitcoins(true, nThreads, coinbase_script);
+            SetAutoSpendParameters(nNumberToSpend, nDenomToSpend, strAutoSpendAddress);
+            StartAutoSpend();
         }
     }
+#endif // ENABLE_WALLET
+
+    InitRandomXLightCache(chainActive.Height());
 
     return true;
 }

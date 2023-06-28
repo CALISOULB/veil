@@ -7,29 +7,29 @@
 #include <qt/walletmodel.h>
 #include <qt/guiutil.h>
 #include <qt/optionsmodel.h>
-#include <QIntValidator>
+#include <QRegExpValidator>
 
+#include <QSettings>
+#include <QStandardPaths>
 #include <QString>
 #include <iostream>
 #include <qt/veil/qtutils.h>
 
 SettingsMinting::SettingsMinting(QWidget *parent, WalletView *mainWindow, WalletModel *_walletModel) :
     QDialog(parent),
-    mainWindow(mainWindow),
+    ui(new Ui::SettingsMinting),
     walletModel(_walletModel),
-    ui(new Ui::SettingsMinting)
+    mainWindow(mainWindow)
 {
     ui->setupUi(this);
     ui->btnEsc->setProperty("cssClass" , "btn-text-primary-inactive");
     ui->useBasecoin->setProperty("cssClass" , "btn-check");
 
-    ui->btnSendMint->setProperty("cssClass" , "btn-text-primary");
-    ui->btnSendMint->setText("MINT");
-
+    ui->btnMint->setProperty("cssClass" , "btn-text-primary");
 
     ui->btnEsc->setProperty("cssClass" , "btn-text-primary-inactive");
 
-    ui->editAmount->setPlaceholderText("Enter amount here");
+    ui->editAmount->setPlaceholderText("Enter amount here (multiple of 10)");
     ui->editAmount->setAttribute(Qt::WA_MacShowFocusRect, 0);
     ui->editAmount->setProperty("cssClass" , "edit-primary");
 
@@ -40,6 +40,27 @@ SettingsMinting::SettingsMinting(QWidget *parent, WalletView *mainWindow, Wallet
     ui->labelZVeilBalance->setText(BitcoinUnits::formatWithUnit(unit, balances.zerocoin_balance, false, BitcoinUnits::separatorAlways));
     ui->labelConvertableCt->setText(BitcoinUnits::formatWithUnit(unit,balances.ct_balance, false, BitcoinUnits::separatorAlways));
     ui->labelConvertableBasecoin->setText(BitcoinUnits::formatWithUnit(unit,balances.basecoin_balance, false, BitcoinUnits::separatorAlways));
+    ui->labelConvertibleRingCt->setText(BitcoinUnits::formatWithUnit(unit,balances.ring_ct_balance, false, BitcoinUnits::separatorAlways));
+
+    CAmount nMinDenom = libzerocoin::ZerocoinDenominationToAmount(libzerocoin::CoinDenomination::ZQ_TEN);
+
+    if (balances.basecoin_balance < nMinDenom) {
+        ui->warnLabel->setText(ui->warnLabel->text().arg(libzerocoin::CoinDenomination::ZQ_TEN + 0.1));
+        ui->warnLabel->setVisible(true);
+        ui->btnSendMint->setEnabled(false);
+    } else {
+        ui->warnLabel->setVisible(false);
+        ui->btnSendMint->setEnabled(true);
+    }
+
+    //retrieved saved settings if nautomintdenom is not in use
+    QSettings* settings = getSettings();
+    if (!gArgs.IsArgSet("-nautomintdenom") && settings->contains("nAutomintDenom")){
+		int tempPref = settings->value("nAutomintDenom").toInt();
+		if(tempPref != nPreferredDenom && tempPref != 0){
+			nPreferredDenom = tempPref;
+		}
+	}
 
     switch (nPreferredDenom){
         case 10:
@@ -51,22 +72,40 @@ SettingsMinting::SettingsMinting(QWidget *parent, WalletView *mainWindow, Wallet
         case 1000:
             ui->radioButton1000->setChecked(true);
             break;
-        case 100000:
+        case 10000:
             ui->radioButton100000->setChecked(true);
+            break;
+        case -1:
+            ui->checkAutomintInstant->setChecked(true);
             break;
     }
 
-    //
     ui->errorMessage->setVisible(false);
 
-    ui->editAmount->setValidator(new QIntValidator(0, 100000000000, this) );
+    // one digit between 1 and 9 followed by 0 to 10 digits followed by a zero (as it must
+    // be a multiple of 10
+    QRegExp rx("[1-9]\\d{1,11}");
+    ui->editAmount->setValidator(new QRegExpValidator(rx, this) );
 
     connect(ui->btnEsc,SIGNAL(clicked()),this, SLOT(close()));
     connect(ui->btnSendMint,SIGNAL(clicked()),this, SLOT(btnMint()));
-    connect(ui->radioButton10, SIGNAL(toggled(bool)), this, SLOT(onCheck10Clicked(bool)));
-    connect(ui->radioButton100, SIGNAL(toggled(bool)), this, SLOT(onCheck100Clicked(bool)));
-    connect(ui->radioButton1000, SIGNAL(toggled(bool)), this, SLOT(onCheck1000Clicked(bool)));
-    connect(ui->radioButton100000, SIGNAL(toggled(bool)), this, SLOT(onCheck100000Clicked(bool)));
+    connect(ui->editAmount, SIGNAL(returnPressed()), this, SLOT(btnMint()));
+    if(gArgs.IsArgSet("-nautomintdenom")){
+    	ui->labelAutomintConfig->setVisible(true);
+    	ui->radioButton10->setEnabled(0);
+    	ui->radioButton100->setEnabled(0);
+    	ui->radioButton1000->setEnabled(0);
+    	ui->radioButton100000->setEnabled(0);
+    	ui->checkAutomintInstant->setEnabled(0);
+    }
+    else{
+    	ui->labelAutomintConfig->setVisible(false);
+    	connect(ui->radioButton10, SIGNAL(toggled(bool)), this, SLOT(onCheck10Clicked(bool)));
+    	connect(ui->radioButton100, SIGNAL(toggled(bool)), this, SLOT(onCheck100Clicked(bool)));
+    	connect(ui->radioButton1000, SIGNAL(toggled(bool)), this, SLOT(onCheck1000Clicked(bool)));
+    	connect(ui->radioButton100000, SIGNAL(toggled(bool)), this, SLOT(onCheck100000Clicked(bool)));
+    	connect(ui->checkAutomintInstant, SIGNAL(toggled(bool)), this, SLOT(onCheckFullMintClicked(bool)));
+    }
     connect(ui->editAmount, SIGNAL(textChanged(const QString &)), this, SLOT(mintAmountChange(const QString &)));
 
 }
@@ -107,8 +146,15 @@ void SettingsMinting::btnMint(){
     mintzerocoins();
 }
 
-void SettingsMinting::mintzerocoins(){
+void SettingsMinting::mintzerocoins()
+{
     // check if wallet is unlocked..
+    interfaces::Wallet& wallet = walletModel->wallet();
+    if (wallet.isLocked() || wallet.isUnlockedForStakingOnly()) {
+        openToastDialog("Wallet Is Locked.", this);
+        return;
+    }
+
     bool isAmountValid = false;
     std::string strError;
     CAmount nAmount = parseAmount(ui->editAmount->text(), isAmountValid, strError);
@@ -121,8 +167,6 @@ void SettingsMinting::mintzerocoins(){
     }
 
     bool fUseBasecoin = ui->useBasecoin->isChecked();
-
-    interfaces::Wallet& wallet = walletModel->wallet();
     std::vector<CDeterministicMint> vDMints;
     std::vector<COutPoint> vOutpts;
     OutputTypes inputtype = OUTPUT_NULL;
@@ -154,28 +198,42 @@ void SettingsMinting::mintzerocoins(){
 void SettingsMinting::onCheck10Clicked(bool res) {
     if(res && nPreferredDenom != 10){
         nPreferredDenom = 10;
+        saveSettings(nPreferredDenom);
     }
 }
 
 void SettingsMinting::onCheck100Clicked(bool res){
     if(res && nPreferredDenom != 100){
         nPreferredDenom = 100;
+        saveSettings(nPreferredDenom);
     }
 }
 
 void SettingsMinting::onCheck1000Clicked(bool res){
     if(res && nPreferredDenom != 1000){
         nPreferredDenom = 1000;
+        saveSettings(nPreferredDenom);
     }
 }
 
 void SettingsMinting::onCheck100000Clicked(bool res){
     if(res && nPreferredDenom != 10000){
         nPreferredDenom = 10000;
+        saveSettings(nPreferredDenom);
     }
 }
 
-void SettingsMinting::onEscapeClicked(){
+void SettingsMinting::onCheckFullMintClicked(bool res){
+    if(res && nPreferredDenom != -1){
+        nPreferredDenom = -1;
+        saveSettings(nPreferredDenom);
+    }
+}
+
+void SettingsMinting::saveSettings(int prefDenom){
+    QSettings* settings = getSettings();
+    settings->setValue("nAutomintDenom", prefDenom);
+    settings->sync();
 }
 
 SettingsMinting::~SettingsMinting()

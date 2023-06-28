@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef RECEIVEWIDGET_H
 #define RECEIVEWIDGET_H
 
@@ -23,12 +27,12 @@ public:
     virtual void showEvent(QShowEvent *event) override;
     virtual void hideEvent(QHideEvent *event) override;
     void setWalletModel(WalletModel *model);
-
+    void setDisplayRcvAddress(CTxDestination *displayAddress);
 
     void refreshWalletStatus();
 
 public Q_SLOTS:
-    void on_btnCopyAddress_clicked();
+    void onBtnCopyAddressClicked();
     void generateNewAddressClicked();
 
 private:
@@ -40,7 +44,10 @@ private:
     CPubKey newKey;
     QString qAddress;
 
-    bool generateNewAddress();
+    bool generateNewAddress(bool isOnDemand = false);
+
+    bool displayAddressSet = false;
+    CTxDestination currentDisplayAddress;
 };
 
 #endif // RECEIVEWIDGET_H

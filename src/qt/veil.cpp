@@ -1,4 +1,5 @@
 // Copyright (c) 2011-2019 The Bitcoin Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -19,13 +20,14 @@
 #include <qt/networkstyle.h>
 #include <qt/optionsmodel.h>
 #include <qt/platformstyle.h>
-#include <qt/splashscreen.h>
 #include <qt/utilitydialog.h>
 #include <qt/winshutdownmonitor.h>
+#include <qt/macdarkmode.h>
 
 #ifdef ENABLE_WALLET
 #include <qt/paymentserver.h>
 #include <qt/walletmodel.h>
+#include <wallet/wallet.h> // For DEFAULT_DISABLE_WALLET
 #endif
 
 #include <interfaces/handler.h>
@@ -34,9 +36,12 @@
 #include <ui_interface.h>
 #include <uint256.h>
 #include <util.h>
+#include <key_io.h>
 #include <warnings.h>
 
 #include <walletinitinterface.h>
+
+#include <qt/veil/qtutils.h>
 
 #include <memory>
 #include <stdint.h>
@@ -49,6 +54,7 @@
 #include <QLocale>
 #include <QMessageBox>
 #include <QSettings>
+#include <QString>
 #include <QThread>
 #include <QTimer>
 #include <QTranslator>
@@ -142,12 +148,19 @@ static void initTranslations(QTranslator &qtTranslatorBase, QTranslator &qtTrans
 /* qDebug() message handler --> debug.log */
 void DebugMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString &msg)
 {
+//#ifndef QT_MESSAGELOGCONTEXT
+// ^ Do not use this except in debugging environments as some OSs don't handle it properly
+ 
     Q_UNUSED(context);
     if (type == QtDebugMsg) {
         LogPrint(BCLog::QT, "GUI: %s\n", msg.toStdString());
     } else {
         LogPrintf("GUI: %s\n", msg.toStdString());
     }
+
+//#else // QT_MESSAGELOGCONTEXT needs to be added to the DEFS line of the Makefile
+//    LogPrintf("GUI: %s:%d %s\n", context.file, context.line, msg.toStdString());
+//#endif
 }
 
 /** Class encapsulating Bitcoin Core startup and shutdown.
@@ -306,6 +319,17 @@ BitcoinApplication::BitcoinApplication(interfaces::Node& node, int &argc, char *
 
 void BitcoinApplication::setupPlatformStyle()
 {
+// This causes compatibility issues with macOS 10.14+
+// Disabling of dark mode may already be handled in info.plist.in section NSRequiresAquaSystemAppearance
+#if 0
+#if defined(Q_OS_MAC)
+    // This is a work around for our not having as yet any "Dark Mode" compatible
+    // stylesheets.  Enforce the use of known-good Aqua style on systems that support
+    // the NSAppearance property.
+    disableDarkMode();
+#endif
+#endif
+
     // UI per-platform customization
     // This must be done inside the BitcoinApplication constructor, or after it, because
     // PlatformStyle::instantiate requires a QApplication
@@ -330,8 +354,10 @@ BitcoinApplication::~BitcoinApplication()
     delete window;
     window = 0;
 #ifdef ENABLE_WALLET
-    delete paymentServer;
-    paymentServer = 0;
+    if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        delete paymentServer;
+        paymentServer = 0;
+    }
 #endif
     delete optionsModel;
     optionsModel = 0;
@@ -342,7 +368,9 @@ BitcoinApplication::~BitcoinApplication()
 #ifdef ENABLE_WALLET
 void BitcoinApplication::createPaymentServer()
 {
-    paymentServer = new PaymentServer(this);
+    if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        paymentServer = new PaymentServer(this);
+    }
 }
 #endif
 
@@ -421,11 +449,13 @@ void BitcoinApplication::requestShutdown()
     pollShutdownTimer->stop();
 
 #ifdef ENABLE_WALLET
-    window->removeAllWallets();
-    for (WalletModel *walletModel : m_wallet_models) {
-        delete walletModel;
+    if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        window->removeAllWallets();
+        for (WalletModel *walletModel : m_wallet_models) {
+            delete walletModel;
+        }
+        m_wallet_models.clear();
     }
-    m_wallet_models.clear();
 #endif
     delete clientModel;
     clientModel = 0;
@@ -439,6 +469,9 @@ void BitcoinApplication::requestShutdown()
 void BitcoinApplication::addWallet(WalletModel* walletModel)
 {
 #ifdef ENABLE_WALLET
+    if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET))
+        return;
+
     window->addWallet(walletModel);
 
     if (m_wallet_models.empty()) {
@@ -456,6 +489,9 @@ void BitcoinApplication::addWallet(WalletModel* walletModel)
 void BitcoinApplication::removeWallet()
 {
 #ifdef ENABLE_WALLET
+    if (gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET))
+        return;
+
     WalletModel* walletModel = static_cast<WalletModel*>(sender());
     m_wallet_models.erase(std::find(m_wallet_models.begin(), m_wallet_models.end(), walletModel));
     window->removeWallet(walletModel);
@@ -473,23 +509,27 @@ void BitcoinApplication::initializeResult(bool success)
         // Log this only after AppInitMain finishes, as then logging setup is guaranteed complete
         qWarning() << "Platform customization:" << platformStyle->getName();
 #ifdef ENABLE_WALLET
-        PaymentServer::LoadRootCAs();
-        paymentServer->setOptionsModel(optionsModel);
+        if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+            PaymentServer::LoadRootCAs();
+            paymentServer->setOptionsModel(optionsModel);
+        }
 #endif
 
         clientModel = new ClientModel(m_node, optionsModel);
         window->setClientModel(clientModel);
 
 #ifdef ENABLE_WALLET
-        m_handler_load_wallet = m_node.handleLoadWallet([this](std::unique_ptr<interfaces::Wallet> wallet) {
-            WalletModel* wallet_model = new WalletModel(std::move(wallet), m_node, platformStyle, optionsModel, nullptr);
-            // Fix wallet model thread affinity.
-            wallet_model->moveToThread(thread());
-            QMetaObject::invokeMethod(this, "addWallet", Qt::QueuedConnection, Q_ARG(WalletModel*, wallet_model));
-        });
+        if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+            m_handler_load_wallet = m_node.handleLoadWallet([this](std::unique_ptr<interfaces::Wallet> wallet) {
+                WalletModel* wallet_model = new WalletModel(std::move(wallet), m_node, platformStyle, optionsModel, nullptr);
+                // Fix wallet model thread affinity.
+                wallet_model->moveToThread(thread());
+                QMetaObject::invokeMethod(this, "addWallet", Qt::QueuedConnection, Q_ARG(WalletModel*, wallet_model));
+            });
 
-        for (auto& wallet : m_node.getWallets()) {
-            addWallet(new WalletModel(std::move(wallet), m_node, platformStyle, optionsModel));
+            for (auto& wallet : m_node.getWallets()) {
+                addWallet(new WalletModel(std::move(wallet), m_node, platformStyle, optionsModel));
+            }
         }
 #endif
 
@@ -505,15 +545,17 @@ void BitcoinApplication::initializeResult(bool success)
         Q_EMIT splashFinished(window);
 
 #ifdef ENABLE_WALLET
-        // Now that initialization/startup is done, process any command-line
-        // veil: URIs or payment requests:
-        connect(paymentServer, SIGNAL(receivedPaymentRequest(SendCoinsRecipient)),
-                         window, SLOT(handlePaymentRequest(SendCoinsRecipient)));
-        connect(window, SIGNAL(receivedURI(QString)),
-                         paymentServer, SLOT(handleURIOrFile(QString)));
-        connect(paymentServer, SIGNAL(message(QString,QString,unsigned int)),
-                         window, SLOT(message(QString,QString,unsigned int)));
-        QTimer::singleShot(100, paymentServer, SLOT(uiReady()));
+        if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+            // Now that initialization/startup is done, process any command-line
+            // veil: URIs or payment requests:
+            connect(paymentServer, SIGNAL(receivedPaymentRequest(SendCoinsRecipient)),
+                             window, SLOT(handlePaymentRequest(SendCoinsRecipient)));
+            connect(window, SIGNAL(receivedURI(QString)),
+                             paymentServer, SLOT(handleURIOrFile(QString)));
+            connect(paymentServer, SIGNAL(message(QString,QString,unsigned int)),
+                             window, SLOT(message(QString,QString,unsigned int)));
+            QTimer::singleShot(100, paymentServer, SLOT(uiReady()));
+        }
 #endif
         pollShutdownTimer->start(200);
     } else {
@@ -566,15 +608,14 @@ int main(int argc, char *argv[])
 
     /// 1. Basic Qt initialization (not dependent on parameters or configuration)
     Q_INIT_RESOURCE(veil);
-    Q_INIT_RESOURCE(bitcoin_locale);
+    Q_INIT_RESOURCE(veil_locale);
 
-    BitcoinApplication app(*node, argc, argv);
 #if QT_VERSION > 0x050100
     // Generate high-dpi pixmaps
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 #endif
 #if QT_VERSION >= 0x050600
-    QGuiApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 #endif
 #ifdef Q_OS_MAC
     QApplication::setAttribute(Qt::AA_DontShowIconsInMenus);
@@ -587,6 +628,8 @@ int main(int argc, char *argv[])
     QSslConfiguration::setDefaultConfiguration(sslconf);
 #endif
 
+    BitcoinApplication app(*node, argc, argv);
+
     // Register meta types used for QMetaObject::invokeMethod
     qRegisterMetaType< bool* >();
     //   Need to pass name here as CAmount is a typedef (see http://qt-project.org/doc/qt-5/qmetatype.html#qRegisterMetaType)
@@ -594,7 +637,9 @@ int main(int argc, char *argv[])
     qRegisterMetaType< CAmount >("CAmount");
     qRegisterMetaType< std::function<void(void)> >("std::function<void(void)>");
 #ifdef ENABLE_WALLET
-    qRegisterMetaType<WalletModel*>("WalletModel*");
+    if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        qRegisterMetaType<WalletModel*>("WalletModel*");
+    }
 #endif
 
     /// 2. Parse command-line options. We do this after qt in order to show an error if there are problems parsing these
@@ -606,6 +651,17 @@ int main(int argc, char *argv[])
         QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
             QObject::tr("Error parsing command line arguments: %1.").arg(QString::fromStdString(error)));
         return EXIT_FAILURE;
+    }
+
+    // Automint denom
+    // If nautomintdenom is set, use it
+    // Else use saved UI settings
+    if(!gArgs.IsArgSet("-nautomintdenom")){
+    	QSettings* settings = getSettings();
+    	int tempPref = settings->value("nAutomintDenom").toInt();
+		if(tempPref != nPreferredDenom && tempPref != 0){
+			nPreferredDenom = tempPref;
+		}
     }
 
     // Now that the QApplication is setup and we have parsed our parameters, we can set the platform style
@@ -665,9 +721,43 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 #ifdef ENABLE_WALLET
-    // Parse URIs on command line -- this can affect Params()
-    PaymentServer::ipcParseCommandLine(*node, argc, argv);
+    if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        // Parse URIs on command line -- this can affect Params()
+        PaymentServer::ipcParseCommandLine(*node, argc, argv);
+    }
 #endif
+
+    // Check for mine algo to be valid
+    std::string sAlgo = gArgs.GetArg("-mine", RANDOMX_STRING);
+    if (!SetMiningAlgorithm(sAlgo))
+    {
+        error = "invalid mining algorithm: " + sAlgo;
+        QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
+            QObject::tr("Error parsing command line arguments: %1.").arg(QString::fromStdString(error)));
+        return EXIT_FAILURE;
+    }
+    // Check for miningaddress (has to be after we setup the parameters
+    std::string sAddress = gArgs.GetArg("-miningaddress", "");
+    if (!sAddress.empty()) {
+        // Sanity check the mining address
+        CTxDestination dest = DecodeDestination(sAddress);
+
+        if (!IsValidDestination(dest)) {
+            error = "miningaddress requires a valid basecoin address";
+            QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
+                QObject::tr("Error parsing command line arguments: %1.").arg(QString::fromStdString(error)));
+            return EXIT_FAILURE;
+        }
+
+        // Disallow Stealth Addresses for now
+        CBitcoinAddress address(sAddress);
+        if (address.IsValidStealthAddress()) {
+            error = "miningaddress must be a basecoin address";
+            QMessageBox::critical(0, QObject::tr(PACKAGE_NAME),
+                QObject::tr("Error parsing command line arguments: %1.").arg(QString::fromStdString(error)));
+            return EXIT_FAILURE;
+        }
+    }
 
     QScopedPointer<const NetworkStyle> networkStyle(NetworkStyle::instantiate(QString::fromStdString(Params().NetworkIDString())));
     assert(!networkStyle.isNull());
@@ -677,21 +767,26 @@ int main(int argc, char *argv[])
     initTranslations(qtTranslatorBase, qtTranslator, translatorBase, translator);
 
 #ifdef ENABLE_WALLET
-    /// 8. URI IPC sending
-    // - Do this early as we don't want to bother initializing if we are just calling IPC
-    // - Do this *after* setting up the data directory, as the data directory hash is used in the name
-    // of the server.
-    // - Do this after creating app and setting up translations, so errors are
-    // translated properly.
-    if (PaymentServer::ipcSendCommandLine())
-        exit(EXIT_SUCCESS);
+    if (!gArgs.GetBoolArg("-disablewallet", DEFAULT_DISABLE_WALLET)) {
+        /// 8. URI IPC sending
+        // - Do this early as we don't want to bother initializing if we are just calling IPC
+        // - Do this *after* setting up the data directory, as the data directory hash is used in the name
+        // of the server.
+        // - Do this after creating app and setting up translations, so errors are
+        // translated properly.
+        if (PaymentServer::ipcSendCommandLine())
+            exit(EXIT_SUCCESS);
 
-    // Start up the payment server early, too, so impatient users that click on
-    // veil: links repeatedly have their payment requests routed to this process:
-    app.createPaymentServer();
+        // Start up the payment server early, too, so impatient users that click on
+        // veil: links repeatedly have their payment requests routed to this process:
+        app.createPaymentServer();
+    }
 #endif
 
     /// 9. Main GUI initialization
+    // Set the style sheet for the application. QT Tooltip bug workaround: https://bugreports.qt.io/browse/QTBUG-64550
+    app.setStyleSheet(GUIUtil::loadStyleSheet());
+
     // Install global event filter that makes sure that long tooltips can be word-wrapped
     app.installEventFilter(new GUIUtil::ToolTipToRichTextFilter(TOOLTIP_WRAP_THRESHOLD, &app));
 #if defined(Q_OS_WIN)

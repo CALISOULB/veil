@@ -30,7 +30,7 @@ static CBlock BuildBlockTestCase() {
     tx.vin[0].scriptSig.resize(10);
     tx.vpout.resize(2);
     tx.vpout[0]->SetValue(42);
-    std::string strBudgetAddress = veil::Budget().GetBudgetAddress(); // KeyID for now
+    std::string strBudgetAddress = veil::Budget().GetBudgetAddress(0); // KeyID for now
     CTxDestination dest = DecodeDestination(strBudgetAddress);
     auto budgetScript = GetScriptForDestination(dest);
     tx.vpout[1]->SetScriptPubKey(budgetScript);
@@ -56,7 +56,7 @@ static CBlock BuildBlockTestCase() {
     bool mutated;
     block.hashMerkleRoot = BlockMerkleRoot(block, &mutated);
     assert(!mutated);
-    while (!CheckProofOfWork(block.GetPoWHash(), block.nBits, Params().GetConsensus())) ++block.nNonce;
+    while (!CheckProofOfWork(block.GetX16RTPoWHash(), block.nBits, Params().GetConsensus())) ++block.nNonce;
     return block;
 }
 
@@ -293,7 +293,7 @@ BOOST_AUTO_TEST_CASE(EmptyBlockRoundTripTest)
     coinbase.vin[0].scriptSig.resize(10);
     coinbase.vpout.resize(2);
     coinbase.vpout[0]->SetValue(42);
-    std::string strBudgetAddress = veil::Budget().GetBudgetAddress(); // KeyID for now
+    std::string strBudgetAddress = veil::Budget().GetBudgetAddress(0); // KeyID for now
     CTxDestination dest = DecodeDestination(strBudgetAddress);
     auto budgetScript = GetScriptForDestination(dest);
     coinbase.vpout[1]->SetScriptPubKey(budgetScript);
@@ -309,7 +309,7 @@ BOOST_AUTO_TEST_CASE(EmptyBlockRoundTripTest)
     bool mutated;
     block.hashMerkleRoot = BlockMerkleRoot(block, &mutated);
     assert(!mutated);
-    while (!CheckProofOfWork(block.GetPoWHash(), block.nBits, Params().GetConsensus())) ++block.nNonce;
+    while (!CheckProofOfWork(block.GetX16RTPoWHash(), block.nBits, Params().GetConsensus())) ++block.nNonce;
 
     // Test simple header round-trip with only coinbase
     {

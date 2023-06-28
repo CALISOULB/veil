@@ -23,13 +23,13 @@ public:
     explicit SettingsMinting(QWidget *parent = nullptr, WalletView *mainWindow = nullptr, WalletModel *_walletModel = nullptr);
     ~SettingsMinting();
 private Q_SLOTS:
-    void onEscapeClicked();
     void onCheck10Clicked(bool res);
     void onCheck100Clicked(bool res);
     void onCheck1000Clicked(bool res);
     void onCheck100000Clicked(bool res);
     void mintAmountChange(const QString &amount);
     void btnMint();
+    void onCheckFullMintClicked(bool res);
 private:
     Ui::SettingsMinting *ui;
     WalletModel *walletModel;
@@ -37,6 +37,8 @@ private:
 
     void mintzerocoins();
     CAmount parseAmount(const QString &text, bool& valid_out, std::string& strError) const;
+
+    void saveSettings(int prefDenom);
 };
 
 #endif // SETTINGSMINTING_H

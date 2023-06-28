@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/updateaddress.h>
 #include <qt/veil/forms/ui_updateaddress.h>
 
@@ -13,15 +17,14 @@
 
 #include <QString>
 
-UpdateAddress::UpdateAddress(const QModelIndex &_index, QString addressStr, std::string _addressPurpose, QWidget *parent,  WalletModel* _walletModel,
-                             AddressTableModel *_model) :
+UpdateAddress::UpdateAddress(const QModelIndex &_index, QString addressStr, std::string _addressPurpose, QWidget *parent, WalletModel* _walletModel, AddressTableModel *_model) :
     QDialog(parent),
+    ui(new Ui::UpdateAddress),
     walletModel(_walletModel),
     index(_index),
-    model(_model),
-    address(addressStr),
     addressPurpose(_addressPurpose),
-    ui(new Ui::UpdateAddress)
+    address(addressStr),
+    model(_model)
 {
     ui->setupUi(this);
     connect(ui->btnEsc,SIGNAL(clicked()),this, SLOT(onEscapeClicked()));
@@ -32,7 +35,7 @@ UpdateAddress::UpdateAddress(const QModelIndex &_index, QString addressStr, std:
     ui->errorMessage->setVisible(false);
 
 
-    ui->editLabel->setPlaceholderText("Enter address");
+    ui->editLabel->setPlaceholderText("Enter address label");
     ui->editLabel->setAttribute(Qt::WA_MacShowFocusRect, 0);
     ui->editLabel->setProperty("cssClass" , "edit-primary");
 

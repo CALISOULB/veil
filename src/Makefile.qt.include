@@ -7,92 +7,7 @@ EXTRA_LIBRARIES += qt/libbitcoinqt.a
 
 # veil qt core #
 QT_TS = \
-  qt/locale/bitcoin_af.ts \
-  qt/locale/bitcoin_af_ZA.ts \
-  qt/locale/bitcoin_ar.ts \
-  qt/locale/bitcoin_be_BY.ts \
-  qt/locale/bitcoin_bg_BG.ts \
-  qt/locale/bitcoin_bg.ts \
-  qt/locale/bitcoin_ca_ES.ts \
-  qt/locale/bitcoin_ca.ts \
-  qt/locale/bitcoin_ca@valencia.ts \
-  qt/locale/bitcoin_cs.ts \
-  qt/locale/bitcoin_cy.ts \
-  qt/locale/bitcoin_da.ts \
-  qt/locale/bitcoin_de.ts \
-  qt/locale/bitcoin_el_GR.ts \
-  qt/locale/bitcoin_el.ts \
-  qt/locale/bitcoin_en_GB.ts \
-  qt/locale/bitcoin_en.ts \
-  qt/locale/bitcoin_eo.ts \
-  qt/locale/bitcoin_es_AR.ts \
-  qt/locale/bitcoin_es_CL.ts \
-  qt/locale/bitcoin_es_CO.ts \
-  qt/locale/bitcoin_es_DO.ts \
-  qt/locale/bitcoin_es_ES.ts \
-  qt/locale/bitcoin_es_MX.ts \
-  qt/locale/bitcoin_es.ts \
-  qt/locale/bitcoin_es_UY.ts \
-  qt/locale/bitcoin_es_VE.ts \
-  qt/locale/bitcoin_et_EE.ts \
-  qt/locale/bitcoin_et.ts \
-  qt/locale/bitcoin_eu_ES.ts \
-  qt/locale/bitcoin_fa_IR.ts \
-  qt/locale/bitcoin_fa.ts \
-  qt/locale/bitcoin_fi.ts \
-  qt/locale/bitcoin_fr_CA.ts \
-  qt/locale/bitcoin_fr_FR.ts \
-  qt/locale/bitcoin_fr.ts \
-  qt/locale/bitcoin_gl.ts \
-  qt/locale/bitcoin_he.ts \
-  qt/locale/bitcoin_hi_IN.ts \
-  qt/locale/bitcoin_hr.ts \
-  qt/locale/bitcoin_hu.ts \
-  qt/locale/bitcoin_id_ID.ts \
-  qt/locale/bitcoin_it_IT.ts \
-  qt/locale/bitcoin_it.ts \
-  qt/locale/bitcoin_ja.ts \
-  qt/locale/bitcoin_ka.ts \
-  qt/locale/bitcoin_kk_KZ.ts \
-  qt/locale/bitcoin_ko_KR.ts \
-  qt/locale/bitcoin_ku_IQ.ts \
-  qt/locale/bitcoin_ky.ts \
-  qt/locale/bitcoin_la.ts \
-  qt/locale/bitcoin_lt.ts \
-  qt/locale/bitcoin_lv_LV.ts \
-  qt/locale/bitcoin_mk_MK.ts \
-  qt/locale/bitcoin_mn.ts \
-  qt/locale/bitcoin_ms_MY.ts \
-  qt/locale/bitcoin_nb.ts \
-  qt/locale/bitcoin_ne.ts \
-  qt/locale/bitcoin_nl.ts \
-  qt/locale/bitcoin_pam.ts \
-  qt/locale/bitcoin_pl.ts \
-  qt/locale/bitcoin_pt_BR.ts \
-  qt/locale/bitcoin_pt_PT.ts \
-  qt/locale/bitcoin_ro_RO.ts \
-  qt/locale/bitcoin_ro.ts \
-  qt/locale/bitcoin_ru_RU.ts \
-  qt/locale/bitcoin_ru.ts \
-  qt/locale/bitcoin_sk.ts \
-  qt/locale/bitcoin_sl_SI.ts \
-  qt/locale/bitcoin_sq.ts \
-  qt/locale/bitcoin_sr@latin.ts \
-  qt/locale/bitcoin_sr.ts \
-  qt/locale/bitcoin_sv.ts \
-  qt/locale/bitcoin_ta.ts \
-  qt/locale/bitcoin_th_TH.ts \
-  qt/locale/bitcoin_tr_TR.ts \
-  qt/locale/bitcoin_tr.ts \
-  qt/locale/bitcoin_uk.ts \
-  qt/locale/bitcoin_ur_PK.ts \
-  qt/locale/bitcoin_uz@Cyrl.ts \
-  qt/locale/bitcoin_vi.ts \
-  qt/locale/bitcoin_vi_VN.ts \
-  qt/locale/bitcoin_zh_CN.ts \
-  qt/locale/bitcoin_zh_HK.ts \
-  qt/locale/bitcoin_zh.ts \
-  qt/locale/bitcoin_zh_TW.ts
+  qt/locale/veil_en.ts
 
 QT_FORMS_UI = \
   qt/forms/addressbookpage.ui \
@@ -128,7 +43,6 @@ QT_FORMS_UI = \
   qt/veil/forms/settingschangepassword.ui \
   qt/veil/forms/settingsfaq.ui \
   qt/veil/forms/settingsfaq01.ui \
-  qt/veil/forms/settingsfaq02.ui \
   qt/veil/forms/settingsfaq03.ui \
   qt/veil/forms/settingsfaq04.ui \
   qt/veil/forms/settingsfaq05.ui \
@@ -137,7 +51,7 @@ QT_FORMS_UI = \
   qt/veil/forms/settingsfaq08.ui \
   qt/veil/forms/settingsfaq09.ui \
   qt/veil/forms/settingsfaq10.ui \
-  qt/veil/forms/settingsfaq11.ui \
+  qt/veil/forms/settingsfaq12.ui \
   qt/veil/forms/settingsminting.ui \
   qt/veil/forms/settingsnetwork.ui \
   qt/veil/forms/settingspreferences.ui \
@@ -146,6 +60,7 @@ QT_FORMS_UI = \
   qt/veil/forms/settingsrestoreseed.ui \
   qt/veil/forms/settingswidget.ui \
   qt/veil/forms/receivewidget.ui \
+  qt/veil/forms/miningwidget.ui \
   qt/veil/forms/addresseswidget.ui \
   qt/veil/forms/addressnewcontact.ui \
   qt/veil/forms/addressreceive.ui \
@@ -198,7 +113,6 @@ QT_MOC_CPP = \
   qt/moc_sendcoinsentry.cpp \
   qt/moc_signverifymessagedialog.cpp \
   qt/moc_splashscreenveil.cpp \
-  qt/moc_splashscreen.cpp \
   qt/moc_trafficgraphwidget.cpp \
   qt/moc_transactiondesc.cpp \
   qt/moc_transactiondescdialog.cpp \
@@ -224,7 +138,6 @@ QT_MOC_CPP = \
   qt/veil/settings/moc_settingschangepassword.cpp \
   qt/veil/settings/moc_settingsfaq.cpp \
   qt/veil/settings/moc_settingsfaq01.cpp \
-  qt/veil/settings/moc_settingsfaq02.cpp \
   qt/veil/settings/moc_settingsfaq03.cpp \
   qt/veil/settings/moc_settingsfaq04.cpp \
   qt/veil/settings/moc_settingsfaq05.cpp \
@@ -233,7 +146,7 @@ QT_MOC_CPP = \
   qt/veil/settings/moc_settingsfaq08.cpp \
   qt/veil/settings/moc_settingsfaq09.cpp \
   qt/veil/settings/moc_settingsfaq10.cpp \
-  qt/veil/settings/moc_settingsfaq11.cpp \
+  qt/veil/settings/moc_settingsfaq12.cpp \
   qt/veil/settings/moc_settingsminting.cpp \
   qt/veil/settings/moc_settingsnetwork.cpp \
   qt/veil/settings/moc_settingspreferences.cpp \
@@ -242,6 +155,7 @@ QT_MOC_CPP = \
   qt/veil/settings/moc_settingsrestoreseed.cpp \
   qt/veil/settings/moc_settingswidget.cpp \
   qt/veil/moc_receivewidget.cpp \
+  qt/veil/moc_miningwidget.cpp \
   qt/veil/moc_addresseswidget.cpp \
   qt/veil/moc_addressnewcontact.cpp \
   qt/veil/moc_addressreceive.cpp \
@@ -259,7 +173,8 @@ QT_MOC_CPP = \
 
 BITCOIN_MM = \
   qt/macdockiconhandler.mm \
-  qt/macnotificationhandler.mm
+  qt/macnotificationhandler.mm \
+  qt/macdarkmode.mm
 
 QT_MOC = \
   qt/veil.moc \
@@ -272,8 +187,8 @@ QT_MOC = \
 
 QT_QRC_CPP = qt/qrc_veil.cpp
 QT_QRC = qt/veil.qrc
-QT_QRC_LOCALE_CPP = qt/qrc_bitcoin_locale.cpp
-QT_QRC_LOCALE = qt/bitcoin_locale.qrc
+QT_QRC_LOCALE_CPP = qt/qrc_veil_locale.cpp
+QT_QRC_LOCALE = qt/veil_locale.qrc
 
 PROTOBUF_CC = qt/paymentrequest.pb.cc
 PROTOBUF_H = qt/paymentrequest.pb.h
@@ -299,6 +214,7 @@ BITCOIN_QT_H = \
   qt/intro.h \
   qt/macdockiconhandler.h \
   qt/macnotificationhandler.h \
+  qt/macdarkmode.h \
   qt/modaloverlay.h \
   qt/networkstyle.h \
   qt/notificator.h \
@@ -320,7 +236,6 @@ BITCOIN_QT_H = \
   qt/sendcoinsentry.h \
   qt/signverifymessagedialog.h \
   qt/splashscreenveil.h \
-  qt/splashscreen.h \
   qt/trafficgraphwidget.h \
   qt/transactiondesc.h \
   qt/transactiondescdialog.h \
@@ -349,7 +264,6 @@ BITCOIN_QT_H = \
   qt/veil/settings/settingschangepassword.h \
   qt/veil/settings/settingsfaq.h \
   qt/veil/settings/settingsfaq01.h \
-  qt/veil/settings/settingsfaq02.h \
   qt/veil/settings/settingsfaq03.h \
   qt/veil/settings/settingsfaq04.h \
   qt/veil/settings/settingsfaq05.h \
@@ -358,7 +272,7 @@ BITCOIN_QT_H = \
   qt/veil/settings/settingsfaq08.h \
   qt/veil/settings/settingsfaq09.h \
   qt/veil/settings/settingsfaq10.h \
-  qt/veil/settings/settingsfaq11.h \
+  qt/veil/settings/settingsfaq12.h \
   qt/veil/settings/settingsminting.h \
   qt/veil/settings/settingsnetwork.h \
   qt/veil/settings/settingspreferences.h \
@@ -367,6 +281,7 @@ BITCOIN_QT_H = \
   qt/veil/settings/settingsrestoreseed.h \
   qt/veil/settings/settingswidget.h \
   qt/veil/receivewidget.h \
+  qt/veil/miningwidget.h \
   qt/veil/qtutils.h \
   qt/veil/addresseswidget.h \
   qt/veil/addressnewcontact.h \
@@ -390,7 +305,6 @@ RES_ICONS = \
   qt/res/icons/ic-update-address.png \
   qt/res/icons/ic-copy-small.png \
   qt/res/icons/ic-navigation-transactions.png \
-  qt/res/icons/img-logo-binance@2x.png \
   qt/res/icons/ic-nav-transactions@2x.png \
   qt/res/icons/ic-nav-exchange@2x.png \
   qt/res/icons/ic-nav-send.png \
@@ -421,7 +335,6 @@ RES_ICONS = \
   qt/res/icons/ic-navigation-send.png \
   qt/res/icons/ic-nav-exchange@3x.png \
   qt/res/icons/ic-nav-transactions@3x.png \
-  qt/res/icons/img-logo-binance@3x.png \
   qt/res/icons/ic-update-address@2x.png \
   qt/res/icons/ic-add-account-blue.png \
   qt/res/icons/ic-add-blue.png \
@@ -438,7 +351,6 @@ RES_ICONS = \
   qt/res/icons/ic-progress-1-10@3x.png \
   qt/res/icons/ic-nav-send@2x.png \
   qt/res/icons/ic-nav-transactions.png \
-  qt/res/icons/img-logo-bittrex@2x.png \
   qt/res/icons/banner-top@2x.png \
   qt/res/icons/ic-copy-blue.png \
   qt/res/icons/simbol@3x.png \
@@ -470,7 +382,6 @@ RES_ICONS = \
   qt/res/icons/ic_exchange.png \
   qt/res/icons/ic-information@3x.png \
   qt/res/icons/ic-close@3x.png \
-  qt/res/icons/img-logo-bittrex.png \
   qt/res/icons/img_balance_logo@3x.png \
   qt/res/icons/ic-nav-addresses@2x.png \
   qt/res/icons/ic-progress-7-10@3x.png \
@@ -487,7 +398,6 @@ RES_ICONS = \
   qt/res/icons/img_balance_logo.png \
   qt/res/icons/simbol@2x.png \
   qt/res/icons/banner-top@3x.png \
-  qt/res/icons/img-logo-bittrex@3x.png \
   qt/res/icons/ic-nav-send@3x.png \
   qt/res/icons/ic-progress-6-10.png \
   qt/res/icons/veil_splash@3x.png \
@@ -523,11 +433,9 @@ RES_ICONS = \
   qt/res/icons/img-start-logo@3x.png \
   qt/res/icons/ic-nav-overview.png \
   qt/res/icons/img-start-wallet.png \
-  qt/res/icons/img-logo-coinbase.png \
   qt/res/icons/ic-arrow-right@2x.png \
   qt/res/icons/ic-add-blue@2x.png \
   qt/res/icons/ic-progress-9-10@3x.png \
-  qt/res/icons/img-logo-binance.png \
   qt/res/icons/ic-progress-2-10@2x.png \
   qt/res/icons/ic-search-white@2x.png \
   qt/res/icons/ic-progress-1-10.png \
@@ -539,7 +447,6 @@ RES_ICONS = \
   qt/res/icons/banner-top.png \
   qt/res/icons/ic-nav-settings@3x.png \
   qt/res/icons/ic-switch-off@2x.png \
-  qt/res/icons/img-logo-coinbase@2x.png \
   qt/res/icons/img-start-backup.png \
   qt/res/icons/img-start-password.png \
   qt/res/icons/ic-progress-8-10@2x.png \
@@ -576,7 +483,6 @@ RES_ICONS = \
   qt/res/icons/ic-switch-on@3x.png \
   qt/res/icons/ic-progress-8-10@3x.png \
   qt/res/icons/ic-switch-off@3x.png \
-  qt/res/icons/img-logo-coinbase@3x.png \
   qt/res/icons/ic-navigation-settings.png \
   qt/res/icons/ic-nav-settings@2x.png \
   qt/res/icons/img-start-confirm@2x.png \
@@ -653,6 +559,7 @@ RES_ICONS = \
   qt/res/icons/ic-transactions.png \
   qt/res/icons/ic-send.png \
   qt/res/icons/ic-receive.png \
+  qt/res/icons/ic_mined_white.png \
   qt/res/icons/ic-information.png \
   qt/res/icons/logo-splash@3x.png \
   qt/res/icons/logo-splash@2x.png \
@@ -682,6 +589,10 @@ RES_ICONS = \
   qt/res/icons/verify.png
 
 BITCOIN_QT_BASE_CPP = \
+  qt/splashscreenveil.cpp \
+  qt/veil/qtutils.cpp \
+  qt/veil/toast.cpp \
+  qt/veil/veilstatusbar.cpp \
   qt/bantablemodel.cpp \
   qt/bitcoinaddressvalidator.cpp \
   qt/bitcoinamountfield.cpp \
@@ -701,7 +612,6 @@ BITCOIN_QT_BASE_CPP = \
   qt/qvalidatedlineedit.cpp \
   qt/qvaluecombobox.cpp \
   qt/rpcconsole.cpp \
-  qt/splashscreen.cpp \
   qt/trafficgraphwidget.cpp \
   qt/utilitydialog.cpp
 
@@ -724,7 +634,6 @@ BITCOIN_QT_WALLET_CPP = \
   qt/sendcoinsdialog.cpp \
   qt/sendcoinsentry.cpp \
   qt/signverifymessagedialog.cpp \
-  qt/splashscreenveil.cpp \
   qt/transactiondesc.cpp \
   qt/transactiondescdialog.cpp \
   qt/transactionfilterproxy.cpp \
@@ -740,7 +649,6 @@ BITCOIN_QT_WALLET_CPP = \
   qt/veil/tutorialmnemoniccode.cpp \
   qt/veil/tutorialcreatewalletwidget.cpp \
   qt/veil/tutoriallanguageswidget.cpp \
-  qt/veil/qtutils.cpp \
   qt/veil/createpassword.cpp \
   qt/veil/settings/settingsadvanceconsole.cpp \
   qt/veil/settings/settingsadvanceinformation.cpp \
@@ -751,7 +659,6 @@ BITCOIN_QT_WALLET_CPP = \
   qt/veil/settings/settingschangepassword.cpp \
   qt/veil/settings/settingsfaq.cpp \
   qt/veil/settings/settingsfaq01.cpp \
-  qt/veil/settings/settingsfaq02.cpp \
   qt/veil/settings/settingsfaq03.cpp \
   qt/veil/settings/settingsfaq04.cpp \
   qt/veil/settings/settingsfaq05.cpp \
@@ -760,7 +667,7 @@ BITCOIN_QT_WALLET_CPP = \
   qt/veil/settings/settingsfaq08.cpp \
   qt/veil/settings/settingsfaq09.cpp \
   qt/veil/settings/settingsfaq10.cpp \
-  qt/veil/settings/settingsfaq11.cpp \
+  qt/veil/settings/settingsfaq12.cpp \
   qt/veil/settings/settingsminting.cpp \
   qt/veil/settings/settingsnetwork.cpp \
   qt/veil/settings/settingspreferences.cpp \
@@ -769,15 +676,14 @@ BITCOIN_QT_WALLET_CPP = \
   qt/veil/settings/settingsrestoreseed.cpp \
   qt/veil/settings/settingswidget.cpp \
   qt/veil/receivewidget.cpp \
+  qt/veil/miningwidget.cpp \
   qt/veil/addresseswidget.cpp \
   qt/veil/addressnewcontact.cpp \
   qt/veil/addressreceive.cpp \
   qt/veil/balance.cpp \
   qt/veil/sendconfirmation.cpp \
   qt/veil/tooltipbalance.cpp \
-  qt/veil/toast.cpp \
   qt/veil/unlockpassworddialog.cpp \
-  qt/veil/veilstatusbar.cpp \
   qt/veil/transactiondetaildialog.cpp \
   qt/veil/addressesmenu.cpp \
   qt/veil/updateaddress.cpp \
@@ -863,12 +769,12 @@ $(srcdir)/qt/veilstrings.cpp: $(libbitcoin_server_a_SOURCES) $(libbitcoin_wallet
 
 translate: $(srcdir)/qt/veilstrings.cpp $(QT_FORMS_UI) $(QT_FORMS_UI) $(BITCOIN_QT_BASE_CPP) qt/veil.cpp $(BITCOIN_QT_WINDOWS_CPP) $(BITCOIN_QT_WALLET_CPP) $(BITCOIN_QT_H) $(BITCOIN_MM)
 	@test -n $(LUPDATE) || echo "lupdate is required for updating translations"
-	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(LUPDATE) $^ -locations relative -no-obsolete -ts $(srcdir)/qt/locale/bitcoin_en.ts
+	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(LUPDATE) $^ -locations relative -no-obsolete -ts $(srcdir)/qt/locale/veil_en.ts
 
 $(QT_QRC_LOCALE_CPP): $(QT_QRC_LOCALE) $(QT_QM)
 	@test -f $(RCC)
 	@cp -f $< $(@D)/temp_$(<F)
-	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name bitcoin_locale $(@D)/temp_$(<F) | \
+	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name veil_locale $(@D)/temp_$(<F) | \
 	  $(SED) -e '/^\*\*.*Created:/d' -e '/^\*\*.*by:/d' > $@
 	@rm $(@D)/temp_$(<F)
 
@@ -877,7 +783,7 @@ $(QT_QRC_CPP): $(QT_QRC) $(QT_FORMS_H) $(RES_ICONS) $(RES_IMAGES) $(RES_CSS) $(R
 	$(AM_V_GEN) QT_SELECT=$(QT_SELECT) $(RCC) -name veil $< | \
 	  $(SED) -e '/^\*\*.*Created:/d' -e '/^\*\*.*by:/d' > $@
 
-CLEAN_QT = $(nodist_qt_libbitcoinqt_a_SOURCES) $(QT_QM) $(QT_FORMS_H) qt/*.gcda qt/*.gcno qt/temp_bitcoin_locale.qrc
+CLEAN_QT = $(nodist_qt_libbitcoinqt_a_SOURCES) $(QT_QM) $(QT_FORMS_H) qt/*.gcda qt/*.gcno qt/temp_veil_locale.qrc
 
 CLEANFILES += $(CLEAN_QT)
 

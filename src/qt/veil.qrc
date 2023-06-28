@@ -221,15 +221,6 @@
         <file alias="img_balance_logo2">res/icons/img_balance_logo@2x.png</file>
         <file alias="img_balance_logo3">res/icons/img_balance_logo@3x.png</file>
         <file>res/icons/img_splash.jpg</file>
-        <file>res/icons/img-logo-binance.png</file>
-        <file>res/icons/img-logo-binance@2x.png</file>
-        <file>res/icons/img-logo-binance@3x.png</file>
-        <file>res/icons/img-logo-bittrex.png</file>
-        <file>res/icons/img-logo-bittrex@2x.png</file>
-        <file>res/icons/img-logo-bittrex@3x.png</file>
-        <file>res/icons/img-logo-coinbase.png</file>
-        <file>res/icons/img-logo-coinbase@2x.png</file>
-        <file>res/icons/img-logo-coinbase@3x.png</file>
         <file alias="img-start-backup">res/icons/img-start-backup.png</file>
         <file alias="img-start-backup2">res/icons/img-start-backup@2x.png</file>
         <file alias="img-start-backup3">res/icons/img-start-backup@3x.png</file>
@@ -266,6 +257,7 @@
         <file alias="ic-settings-png2">res/icons/ic-settings.png</file>
         <file alias="ic-information-png">res/icons/ic-information.png</file>
         <file alias="ic-receive-png2">res/icons/ic-receive.png</file>
+        <file alias="ic-mined-white-png">res/icons/ic_mined_white.png</file>
         <file alias="ic-send-png2">res/icons/ic-send.png</file>
         <file alias="ic-switch-off-png">res/icons/ic-switch-off.png</file>
         <file alias="ic-switch-on-png">res/icons/ic-switch-on.png</file>

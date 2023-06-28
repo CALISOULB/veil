@@ -112,6 +112,8 @@ class AnonWallet
     CKeyID idMaster;
     CKeyID idDefaultAccount;
     CKeyID idStealthAccount;
+    CKeyID idChangeAccount;
+    CKeyID idChangeAddress;
 
     typedef std::multimap<COutPoint, uint256> TxSpends;
     TxSpends mapTxSpends;
@@ -156,8 +158,12 @@ public:
     isminetype HaveStealthAddress(const CStealthAddress &sxAddr) const;
     bool GetStealthAddressScanKey(CStealthAddress &sxAddr) const;
     bool GetStealthAddressSpendKey(CStealthAddress &sxAddr, CKey &key) const;
+    bool GetAddressMeta(const CStealthAddress& address, CKeyID& idAccount, std::string& strPath) const;
+    int GetLastUsedAddressIndex(const CKeyID& idAccount) const;
+    void ForgetUnusedStealthAddresses(int nBuffer);
 
     bool ImportStealthAddress(const CStealthAddress &sxAddr, const CKey &skSpend);
+    bool RestoreAddresses(int nCount);
 
     std::map<CTxDestination, CAmount> GetAddressBalances() EXCLUSIVE_LOCKS_REQUIRED(cs_main);
 
@@ -194,8 +200,8 @@ public:
     CAmount GetBalance(const isminefilter& filter=ISMINE_SPENDABLE, const int min_depth=0) const;
     CAmount GetSpendableBalance() const;        // Includes watch_only_cs balance
     CAmount GetUnconfirmedBalance() const;
-    CAmount GetBlindBalance();
-    CAmount GetAnonBalance();
+    CAmount GetBlindBalance(const int min_depth=0);
+    CAmount GetAnonBalance(const int min_depth=0);
 
     bool GetBalances(BalanceList &bal);
 //    CAmount GetAvailableBalance(const CCoinControl* coinControl = nullptr) const;
@@ -205,13 +211,11 @@ public:
 
     bool IsChange(const CTxOutBase *txout) const;
 
-    int GetChangeAddress(CPubKey &pk);
-
     void AddOutputRecordMetaData(CTransactionRecord &rtx, std::vector<CTempRecipient> &vecSend);
     bool ExpandTempRecipients(std::vector<CTempRecipient> &vecSend, std::string &sError);
     void MarkInputsAsPendingSpend(CTransactionRecord &rtx);
 
-    int AddCTData(CTxOutBase *txout, CTempRecipient &r, std::string &sError);
+    bool AddCTData(CTxOutBase *txout, CTempRecipient &r, std::string &sError);
 
     bool SetChangeDest(const CCoinControl *coinControl, CTempRecipient &r, std::string &sError);
 
@@ -228,17 +232,20 @@ public:
             CAmount &nFeeRet, const CCoinControl *coinControl, std::string &sError);
 
 
-    int PlaceRealOutputs(std::vector<std::vector<int64_t> > &vMI, size_t &nSecretColumn, size_t nRingSize, std::set<int64_t> &setHave,
+    bool PlaceRealOutputs(std::vector<std::vector<int64_t> > &vMI, size_t &nSecretColumn, size_t nRingSize, std::set<int64_t> &setHave,
         const std::vector<std::pair<MapRecords_t::const_iterator,unsigned int> > &vCoins, std::vector<uint8_t> &vInputBlinds, std::string &sError);
-    int PickHidingOutputs(std::vector<std::vector<int64_t> > &vMI, size_t nSecretColumn, size_t nRingSize, std::set<int64_t> &setHave,
-        std::string &sError);
+    bool PickHidingOutputs(std::vector<std::vector<int64_t> > &vMI, size_t nSecretColumn, size_t nRingSize, std::set<int64_t> &setHave,
+         std::string &sError);
 
-    int AddAnonInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, std::vector<CTempRecipient> &vecSend,
-        bool sign, size_t nRingSize, size_t nInputsPerSig, CAmount &nFeeRet, const CCoinControl *coinControl,
-        std::string &sError, bool fZerocoinInputs, CAmount nInputValue);
-    int AddAnonInputs(CWalletTx &wtx, CTransactionRecord &rtx,
-        std::vector<CTempRecipient> &vecSend, bool sign, size_t nRingSize, size_t nInputsPerSig, CAmount &nFeeRet,
-        const CCoinControl *coinControl, std::string &sError, bool fZerocoinInputs = false, CAmount nInputValue = 0);
+
+    bool IsMyAnonInput(const CTxIn& txin, COutPoint& myOutpoint);
+    bool AddAnonInputs_Inner(CWalletTx &wtx, CTransactionRecord &rtx, std::vector<CTempRecipient> &vecSend,
+         bool sign, size_t nRingSize, size_t nInputsPerSig, CAmount &nFeeRet,
+         const CCoinControl *coinControl, std::string &sError, bool fZerocoinInputs, CAmount nInputValue);
+    bool AddAnonInputs(CWalletTx &wtx, CTransactionRecord &rtx, std::vector<CTempRecipient> &vecSend,
+         bool sign, size_t nRingSize, size_t nInputsPerSig, CAmount &nFeeRet,
+         const CCoinControl *coinControl, std::string &sError, bool fZerocoinInputs = false,
+         CAmount nInputValue = 0);
 
 
     void LoadToWallet(const uint256 &hash, const CTransactionRecord &rtx);
@@ -249,9 +256,13 @@ public:
     int UnloadTransaction(const uint256 &hash);
 
     bool MakeDefaultAccount(const CExtKey& extKeyMaster);
+    bool CreateStealthChangeAccount(AnonWalletDB* wdb);
     bool SetMasterKey(const CExtKey& keyMasterIn);
+    bool UnlockWallet(const CExtKey& keyMasterIn);
     bool LoadAccountCounters();
     bool LoadKeys();
+    CKeyID GetSeedHash() const;
+    int GetStealthAccountCount() const;
 
     bool HaveKeyID(const CKeyID& id);
     bool NewKeyFromAccount(const CKeyID &idAccount, CKey& key);
@@ -260,8 +271,11 @@ public:
     bool RegenerateKey(const CKeyID& idKey, CKey& key) const;
     bool RegenerateExtKey(const CKeyID& idKey, CExtKey& extkey) const;
     bool RegenerateAccountExtKey(const CKeyID& idAccount, CExtKey& keyAccount) const;
+    bool RegenerateKeyFromIndex(const CKeyID& idAccount, int nIndex, CExtKey& keyDerive) const;
+    bool MakeSigningKeystore(CBasicKeyStore& keystore, const CScript& scriptPubKey);
 
-    bool NewStealthKey(CStealthAddress& stealthAddress, uint32_t nPrefixBits, const char *pPrefix);
+    bool NewStealthKey(CStealthAddress& stealthAddress, uint32_t nPrefixBits, const char *pPrefix, CKeyID* paccount = nullptr);
+    CStealthAddress GetStealthChangeAddress();
 
     /**
      * Insert additional inputs into the transaction by
@@ -287,10 +301,12 @@ public:
     bool ScanForOwnedOutputs(const CTransaction &tx, size_t &nCT, size_t &nRingCT, mapValue_t &mapNarr);
     bool AddToWalletIfInvolvingMe(const CTransactionRef& ptx, const CBlockIndex* pIndex, int posInBlock, bool fUpdate);
     void MarkOutputSpent(const COutPoint& outpoint, bool isSpent);
+    void RescanWallet();
 
     int InsertTempTxn(const uint256 &txid, const CTransactionRecord *rtx) const;
 
-    bool GetCTBlindsFromOutput(const CTxOutCT *pout, uint256& blind) const;
+    bool GetCTBlindsFromOutput(const CTxOutBase *pout, uint256& blind) const;
+    bool GetCTBlinds(CKeyID idKey, std::vector<uint8_t>& vData, secp256k1_pedersen_commitment* commitment, std::vector<uint8_t>& vRangeproof, uint256 &blind, int64_t& nValue) const;
     bool OwnBlindOut(AnonWalletDB *pwdb, const uint256 &txhash, const CTxOutCT *pout, COutputRecord &rout, CStoredTransaction &stx, bool &fUpdated);
     int OwnAnonOut(AnonWalletDB *pwdb, const uint256 &txhash, const CTxOutRingCT *pout, COutputRecord &rout, CStoredTransaction &stx, bool &fUpdated);
 

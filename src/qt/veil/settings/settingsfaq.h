@@ -1,10 +1,13 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef SETTINGSFAQ_H
 #define SETTINGSFAQ_H
 
 #include <QWidget>
 #include <QDialog>
 #include <qt/veil/settings/settingsfaq01.h>
-#include <qt/veil/settings/settingsfaq02.h>
 #include <qt/veil/settings/settingsfaq03.h>
 #include <qt/veil/settings/settingsfaq04.h>
 #include <qt/veil/settings/settingsfaq05.h>
@@ -13,7 +16,7 @@
 #include <qt/veil/settings/settingsfaq08.h>
 #include <qt/veil/settings/settingsfaq09.h>
 #include <qt/veil/settings/settingsfaq10.h>
-#include <qt/veil/settings/settingsfaq11.h>
+#include <qt/veil/settings/settingsfaq12.h>
 
 
 namespace Ui {
@@ -30,7 +33,6 @@ public:
 private Q_SLOTS:
     void onEscapeClicked();
     void onRadioButton01Clicked();
-    void onRadioButton02Clicked();
     void onRadioButton03Clicked();
     void onRadioButton04Clicked();
     void onRadioButton05Clicked();
@@ -39,13 +41,13 @@ private Q_SLOTS:
     void onRadioButton08Clicked();
     void onRadioButton09Clicked();
     void onRadioButton10Clicked();
-    void onRadioButton11Clicked();
+    void onRadioButton12Clicked();
+
     void changeScreen(QWidget *widget);
 
 private:
     Ui::SettingsFaq *ui;
     SettingsFaq01 *faq01 = nullptr;
-    SettingsFaq02 *faq02 = nullptr;
     SettingsFaq03 *faq03 = nullptr;
     SettingsFaq04 *faq04 = nullptr;
     SettingsFaq05 *faq05 = nullptr;
@@ -54,7 +56,7 @@ private:
     SettingsFaq08 *faq08 = nullptr;
     SettingsFaq09 *faq09 = nullptr;
     SettingsFaq10 *faq10 = nullptr;
-    SettingsFaq11 *faq11 = nullptr;
+    SettingsFaq12 *faq12 = nullptr;
 };
 
 #endif // SETTINGSFAQ_H

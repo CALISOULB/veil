@@ -45,6 +45,7 @@ WalletModel::WalletModel(std::unique_ptr<interfaces::Wallet> wallet, interfaces:
     // This timer will be fired repeatedly to update the balance
     pollTimer = new QTimer(this);
     connect(pollTimer, SIGNAL(timeout()), this, SLOT(pollBalanceChanged()));
+    connect(pollTimer, SIGNAL(timeout()), this, SLOT(pollMiningActivity()));
     pollTimer->start(MODEL_UPDATE_DELAY);
 
     subscribeToCoreSignals();
@@ -89,6 +90,11 @@ void WalletModel::pollBalanceChanged()
     }
 }
 
+void WalletModel::pollMiningActivity()
+{
+    Q_EMIT updateMiningFields();
+}
+
 void WalletModel::checkBalanceChanged(const interfaces::WalletBalances& new_balances)
 {
     if(new_balances.balanceChanged(m_cached_balances)) {
@@ -130,16 +136,9 @@ bool WalletModel::isStealthAddress(const QString &address){
     return veilAddress.IsValidStealthAddress() && IsValidDestinationString(strAddress);
 }
 
-enum WalletModelSpendType
-{
-    ZCSPEND,
-    CTSPEND,
-    RINGCTSPEND,
-    BASECOINSPEND
-};
-
-WalletModel::SendCoinsReturn WalletModel::prepareTransaction(WalletModelTransaction &transaction, const
-CCoinControl& coinControl, OutputTypes inputType)
+WalletModel::SendCoinsReturn WalletModel::prepareTransaction(WalletModelTransaction &transaction,
+        const CCoinControl& coinControl, WalletModelSpendType &spendType, CZerocoinSpendReceipt &receipt,
+        std::vector<CommitData> &vCommitData, OutputTypes inputType, bool fMintChange)
 {
     CAmount total = 0;
     bool fSubtractFeeFromAmount = false;
@@ -209,41 +208,76 @@ CCoinControl& coinControl, OutputTypes inputType)
     }
 
     auto& newTx = transaction.getWtx();
-    WalletModelSpendType spendType;
-    CZerocoinSpendReceipt receipt;
     CAmount nBalance = 0;
     OutputTypes outputType;
-    if (inputType == OUTPUT_STANDARD) {
+    if (coinControl.HasSelected()) {
+        nBalance = coinControl.GetValueSelected();
+        inputType = static_cast<OutputTypes>(coinControl.nCoinType);
+        if (total > nBalance) {
+            return AmountExceedsBalance;
+        }
+    }
+
+    if (inputType == OUTPUT_STANDARD && !coinControl.fZerocoinSelected) {
         spendType = WalletModelSpendType::BASECOINSPEND;
         outputType = OUTPUT_CT;
         nBalance = m_wallet->getAvailableBalance(coinControl);
+    } else if (inputType == OUTPUT_STANDARD && coinControl.fZerocoinSelected) {
+        spendType = WalletModelSpendType::ZCSPEND;
+        // Get serialhash from coincontrol
+        std::vector<uint256> vSerialHashes;
+        coinControl.ListSelected(vSerialHashes);
+
+        // Create the selectedMints vector
+        std::vector<CZerocoinMint> vMintsSelected;
+        for (auto serialHash : vSerialHashes) {
+            CZerocoinMint mint;
+
+            if (!m_wallet->getMint(serialHash, mint))
+                continue;
+
+            vMintsSelected.emplace_back(mint);
+        }
+
+        //Use low security level while zerocoin is in limp mode
+        newTx = m_wallet->prepareZerocoinSpend(total, /*nSecurityLevel*/3, receipt, vMintsSelected,
+                /*fMintChange*/true, /*fMinimizeChange*/false, vCommitData, libzerocoin::CoinDenomination::ZQ_ERROR,
+                                               &vecSend[0].address);
+        nBalance = m_wallet->getAvailableZerocoinBalance(coinControl);
     } else {
         auto balances = m_wallet->getBalances();
-        std::cout << "zerocoin balnace:" << balances.zerocoin_balance << std::endl;
-        if (balances.zerocoin_balance > total) {
+        if (!coinControl.HasSelected() && balances.zerocoin_balance > total) {
             /**Spend Zerocoins first**/
             spendType = WalletModelSpendType::ZCSPEND;
             //todo, this does not support multi recipient spend yet
-
             std::vector<CZerocoinMint> vMintsSelected;
-            newTx = m_wallet->spendZerocoin(total, /*nSecurityLevel*/100, receipt, vMintsSelected, /*fMintChange*/true,
-                    /*fMinimizeChange*/false, &vecSend[0].address);
+            //Use low security level while zerocoin is in limp mode
+            newTx = m_wallet->prepareZerocoinSpend(total, /*nSecurityLevel*/3, receipt, vMintsSelected,
+                    fMintChange, /*fMinimizeChange*/false, vCommitData, libzerocoin::CoinDenomination::ZQ_ERROR,
+                    &vecSend[0].address);
             nBalance = balances.zerocoin_balance;
         } else {
             /** If not enough zerocoin balance, spend ringct **/
-            spendType = WalletModelSpendType::RINGCTSPEND;
-            outputType = OUTPUT_RINGCT;
-            inputType = OUTPUT_RINGCT;
             int nNetworkAnon = 0;
-            {
-                LOCK(cs_main);
-                nNetworkAnon = chainActive.Tip()->nAnonOutputs;
+            if (!coinControl.HasSelected() || (coinControl.HasSelected() && (inputType == OUTPUT_RINGCT || inputType == OUTPUT_CT))) {
+                spendType = WalletModelSpendType::RINGCTSPEND;
+                outputType = OUTPUT_RINGCT;
+
+                //If input type was not selected with coincontrol, then set to ringct by default
+                if (inputType != OUTPUT_RINGCT && inputType != OUTPUT_CT)
+                    inputType = OUTPUT_RINGCT;
+                {
+                    LOCK(cs_main);
+                    nNetworkAnon = chainActive.Tip()->nAnonOutputs;
+                }
+
+                if (!nBalance)
+                    nBalance = m_wallet->getAvailableRingCTBalance(coinControl);
             }
-            nBalance = m_wallet->getAvailableRingCTBalance(coinControl);
-            if (total > nBalance || nNetworkAnon < 50) {
+
+            if (!coinControl.HasSelected() && (total > nBalance || (nNetworkAnon < 50))) {
                 /** If not enough ringct balance, spend CT **/
                 spendType = WalletModelSpendType::CTSPEND;
-                LogPrintf("%s: rctbalance=%s nanonin=%d\n", __func__, nBalance, nNetworkAnon);
                 nBalance = m_wallet->getAvailableCTBalance(coinControl);
                 inputType = OUTPUT_CT;
             }
@@ -256,15 +290,11 @@ CCoinControl& coinControl, OutputTypes inputType)
 
     if(total > nBalance)
     {
-        std::cout << "Balance: " << nBalance << std::endl;
-        std::cout << "Total: " << total << std::endl;
-        std::cout << "Type: " << inputType << std::endl;
         if(inputType == OUTPUT_STANDARD){
             return AmountExceedsBalance;
         }else{
             return AmountExceedsBalance_NoBasecoinBalanceAccepted;
         }
-
     }
 
     {
@@ -301,7 +331,7 @@ CCoinControl& coinControl, OutputTypes inputType)
     return SendCoinsReturn(OK);
 }
 
-WalletModel::SendCoinsReturn WalletModel::sendCoins(WalletModelTransaction &transaction)
+WalletModel::SendCoinsReturn WalletModel::sendCoins(WalletModelTransaction &transaction, bool fSkipCommitTx)
 {
     QByteArray transaction_array; /* store serialized transaction */
 
@@ -327,7 +357,7 @@ WalletModel::SendCoinsReturn WalletModel::sendCoins(WalletModelTransaction &tran
 
         auto& newTx = transaction.getWtx();
         std::string rejectReason;
-        if (!newTx->commit({} /* mapValue */, std::move(vOrderForm), rejectReason))
+        if (!fSkipCommitTx && !newTx->commit({} /* mapValue */, std::move(vOrderForm), rejectReason))
             return SendCoinsReturn(TransactionCommitFailed, QString::fromStdString(rejectReason));
 
         CDataStream ssTx(SER_NETWORK, PROTOCOL_VERSION);
@@ -367,6 +397,16 @@ WalletModel::SendCoinsReturn WalletModel::sendCoins(WalletModelTransaction &tran
     return SendCoinsReturn(OK);
 }
 
+WalletModel::SendCoinsReturn WalletModel::sendZerocoins(CZerocoinSpendReceipt& receipt,
+        std::vector<CommitData>& vCommitData, int computeTime)
+{
+    if (!m_wallet->commitZerocoinSpend(receipt, vCommitData, computeTime)) {
+        return SendCoinsReturn(ZerocoinSpendFail, QString::fromStdString(receipt.GetStatusMessage()));
+    }
+
+    return SendCoinsReturn(OK);
+}
+
 OptionsModel *WalletModel::getOptionsModel()
 {
     return optionsModel;
@@ -389,7 +429,11 @@ RecentRequestsTableModel *WalletModel::getRecentRequestsTableModel()
 
 WalletModel::EncryptionStatus WalletModel::getEncryptionStatus() const
 {
-    if(!m_wallet->isCrypted())
+    if (m_wallet->isUnlockedForStakingOnly())
+    {
+        return UnlockedForStakingOnly;
+    }
+    else if(!m_wallet->isCrypted())
     {
         return Unencrypted;
     }
@@ -399,8 +443,6 @@ WalletModel::EncryptionStatus WalletModel::getEncryptionStatus() const
     }
     else
     {
-        if (m_wallet->isUnlockedForStakingOnly())
-            return UnlockedForStakingOnly;
         return Unlocked;
     }
 }
@@ -467,7 +509,7 @@ static void NotifyAddressBookChanged(WalletModel *walletmodel,
         const std::string &purpose, ChangeType status)
 {
     bool bench32 = true;
-    if(purpose == "basecoin"){
+    if(purpose == "receive_miner"){
         bench32 = false;
     }
     QString strAddress = QString::fromStdString(EncodeDestination(address,bench32));
@@ -507,12 +549,12 @@ static void NotifyWatchonlyChanged(WalletModel *walletmodel, bool fHaveWatchonly
 void WalletModel::subscribeToCoreSignals()
 {
     // Connect signals to wallet
-    m_handler_unload = m_wallet->handleUnload(boost::bind(&NotifyUnload, this));
-    m_handler_status_changed = m_wallet->handleStatusChanged(boost::bind(&NotifyKeyStoreStatusChanged, this));
-    m_handler_address_book_changed = m_wallet->handleAddressBookChanged(boost::bind(NotifyAddressBookChanged, this, _1, _2, _3, _4, _5));
-    m_handler_transaction_changed = m_wallet->handleTransactionChanged(boost::bind(NotifyTransactionChanged, this, _1, _2));
-    m_handler_show_progress = m_wallet->handleShowProgress(boost::bind(ShowProgress, this, _1, _2));
-    m_handler_watch_only_changed = m_wallet->handleWatchOnlyChanged(boost::bind(NotifyWatchonlyChanged, this, _1));
+    m_handler_unload = m_wallet->handleUnload(std::bind(&NotifyUnload, this));
+    m_handler_status_changed = m_wallet->handleStatusChanged(std::bind(&NotifyKeyStoreStatusChanged, this));
+    m_handler_address_book_changed = m_wallet->handleAddressBookChanged(std::bind(NotifyAddressBookChanged, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
+    m_handler_transaction_changed = m_wallet->handleTransactionChanged(std::bind(NotifyTransactionChanged, this, std::placeholders::_1, std::placeholders::_2));
+    m_handler_show_progress = m_wallet->handleShowProgress(std::bind(ShowProgress, this, std::placeholders::_1, std::placeholders::_2));
+    m_handler_watch_only_changed = m_wallet->handleWatchOnlyChanged(std::bind(NotifyWatchonlyChanged, this, std::placeholders::_1));
 }
 
 void WalletModel::unsubscribeFromCoreSignals()
@@ -529,30 +571,33 @@ void WalletModel::unsubscribeFromCoreSignals()
 // WalletModel::UnlockContext implementation
 WalletModel::UnlockContext WalletModel::requestUnlock()
 {
-    bool was_locked = getEncryptionStatus() == Locked;
-    if(was_locked)
+    auto status = getEncryptionStatus();
+    if(status == Locked || status == UnlockedForStakingOnly)
     {
         // Request UI to unlock wallet
         Q_EMIT requireUnlock();
     }
     // If wallet is still locked, unlock was failed or cancelled, mark context as invalid
-    bool valid = getEncryptionStatus() != Locked;
+    auto newStatus = getEncryptionStatus();
+    bool valid = newStatus != Locked && newStatus != UnlockedForStakingOnly;
 
-    return UnlockContext(this, valid, was_locked);
+    return UnlockContext(this, valid, status);
 }
 
-WalletModel::UnlockContext::UnlockContext(WalletModel *_wallet, bool _valid, bool _relock):
+WalletModel::UnlockContext::UnlockContext(WalletModel *_wallet, bool _valid, EncryptionStatus _statusReturn):
         wallet(_wallet),
         valid(_valid),
-        relock(_relock)
+        statusReturn(_statusReturn)
 {
 }
 
 WalletModel::UnlockContext::~UnlockContext()
 {
-    if(valid && relock)
+    if(valid)
     {
-        wallet->setWalletLocked(true, /*fUnlockForStakingOnly*/false);
+        bool fStakingOnly = statusReturn == UnlockedForStakingOnly;
+        if (statusReturn == Locked || fStakingOnly)
+            wallet->setWalletLocked(true, fStakingOnly);
     }
 }
 
@@ -560,7 +605,7 @@ void WalletModel::UnlockContext::CopyFrom(const UnlockContext& rhs)
 {
     // Transfer context; old object no longer relocks wallet
     *this = rhs;
-    rhs.relock = false;
+    rhs.statusReturn = Unlocked;
 }
 
 void WalletModel::loadReceiveRequests(std::vector<std::string>& vReceiveRequests)

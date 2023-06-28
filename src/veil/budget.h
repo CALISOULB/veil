@@ -17,22 +17,28 @@ class BudgetParams
 
 private:
     explicit BudgetParams(std::string strNetwork);
+    std::string budgetAddress_legacy;
+    std::string budgetAddress_302401;
     std::string budgetAddress;
     std::string founderAddress;
-    std::string labAddress;
+    std::string foundationAddress_legacy;
+    std::string foundationAddress;
+    int nHeightAddressChange_legacy;
+    int nHeightAddressChange_302401;
 
 public:
+    static bool IsSuperBlock(int nBlockHeight);
     static BudgetParams* Get();
 
     static void GetBlockRewards(int nBlockHeight,
                                 CAmount& nBlockReward,
                                 CAmount& nFounderPayment,
-                                CAmount& nLabPayment,
+                                CAmount& nFoundationPayment,
                                 CAmount& nBudgetPayment);
 
-    std::string GetBudgetAddress() const { return budgetAddress; }
-    std::string GetFounderAddress() const { return founderAddress; }
-    std::string GetLabAddress() const { return labAddress; }
+    std::string GetBudgetAddress(int nHeight) const;
+    std::string GetFounderAddress() const;
+    std::string GetFoundationAddress(int nHeight) const;
     static const int nBlocksPerPeriod = 43200;
 };
 

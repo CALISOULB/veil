@@ -128,11 +128,15 @@ private:
     void operator=(const CZerocoinDB&);
 
 public:
-    /** Write zPIV mints to the zerocoinDB in a batch */
+    /** Write Zerocoin mints to the zerocoinDB in a batch */
     bool WriteCoinMintBatch(const std::map<libzerocoin::PublicCoin, uint256>& mintInfo);
     bool ReadCoinMint(const CBigNum& bnPubcoin, uint256& txHash);
     bool ReadCoinMint(const uint256& hashPubcoin, uint256& hashTx);
-    /** Write zPIV spends to the zerocoinDB in a batch */
+    bool ReadPubcoinSpend(const uint256& hashPubcoin, uint256& txHash, uint256& hashBlock);
+    bool WritePubcoinSpendBatch(std::map<uint256, uint256>& mapPubcoinSpends, const uint256& hashBlock);
+    bool ErasePubcoinSpend(const uint256& hashPubcoin);
+
+    /** Write Zerocoin spends to the zerocoinDB in a batch */
     bool WriteCoinSpendBatch(const std::map<libzerocoin::CoinSpend, uint256>& spendInfo);
     bool ReadCoinSpend(const CBigNum& bnSerial, uint256& txHash);
     bool ReadCoinSpend(const uint256& hashSerial, uint256 &txHash);
@@ -142,6 +146,14 @@ public:
     bool WriteAccumulatorValue(const uint256& nChecksum, const CBigNum& bnValue);
     bool ReadAccumulatorValue(const uint256& nChecksum, CBigNum& bnValue);
     bool EraseAccumulatorValue(const uint256& nChecksum);
+
+    /** blacklist **/
+    bool WriteBlacklistedOutpoint(const COutPoint& outpoint, int nType);
+    bool EraseBlacklistedOutpoint(const COutPoint& outpoint);
+    bool WriteBlacklistedPubcoin(const uint256& hashPubcoin);
+    bool EraseBlacklisterPubcoin(const uint256& hashPubcoin);
+    bool LoadBlacklistOutPoints();
+    bool LoadBlacklistPubcoins();
 };
 
 #endif // BITCOIN_TXDB_H

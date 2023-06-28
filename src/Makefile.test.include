@@ -66,9 +66,11 @@ BITCOIN_TESTS =\
   test/policyestimator_tests.cpp \
   test/pow_tests.cpp \
   test/prevector_tests.cpp \
+  test/progpow_tests.cpp \
   test/proofofstaketests.cpp \
   test/raii_event_tests.cpp \
   test/random_tests.cpp \
+  test/randomx_tests.cpp \
   test/reverselock_tests.cpp \
   test/rpc_tests.cpp \
   test/sanity_tests.cpp \
@@ -94,9 +96,12 @@ BITCOIN_TESTS =\
   test/versionbits_tests.cpp \
   test/monthly_rewards_tests.cpp \
   test/libzerocoin_tests.cpp \
+  test/zerocoin_bignum_tests.cpp \
   test/zerocoin_denomination_tests.cpp \
   test/zerocoin_implementation_tests.cpp \
-  test/zerocoin_transactions_tests.cpp
+  test/zerocoin_pubcoinsig_tests.cpp \
+  test/zerocoin_transactions_tests.cpp \
+  test/zerocoin_zkp_tests.cpp
 
 if ENABLE_WALLET
 BITCOIN_TESTS += \

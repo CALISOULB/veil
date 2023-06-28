@@ -15,6 +15,8 @@
 #include "ui_interface.h"
 #include "mintmeta.h"
 
+#include <boost/thread.hpp>
+
 // 6 comes from OPCODE (1) + vch.size() (1) + BIGNUM size (4)
 #define SCRIPT_OFFSET 6
 // For Script size (BIGNUM/Uint256 size)
@@ -69,6 +71,50 @@ bool BlockToPubcoinList(const CBlock& block, std::list<libzerocoin::PublicCoin>&
 
             listPubcoins.emplace_back(pubCoin);
         }
+    }
+
+    return true;
+}
+
+bool ThreadedBatchVerify(const std::vector<libzerocoin::SerialNumberSoKProof>* pvProofs, int nThreads)
+{
+    int64_t nMaxThreads = gArgs.GetArg("-threadbatchverify", DEFAULT_BATCHVERIFY_THREADS);
+    if (nThreads != -1)
+        nMaxThreads = nThreads;
+
+    // Assume that it doesn't give any gain to multithread, unless each thread has at least 6 proofs
+    int nThreadEfficiency = 7;
+
+    std::vector<std::vector<const libzerocoin::SerialNumberSoKProof*>> vProofGroups(1);
+    int nThreadsUsed = 1;
+    if ((int)pvProofs->size() > nThreadEfficiency)
+        nThreadsUsed = pvProofs->size() / nThreadEfficiency;
+    if (nThreadsUsed > nMaxThreads)
+        nThreadsUsed = nMaxThreads;
+
+    vProofGroups.resize(nThreadsUsed);
+    std::vector<uint8_t> vReturn(nThreadsUsed);
+    int nThreadSelected = 0;
+
+    for (unsigned int i = 0; i < pvProofs->size(); i++) {
+        vProofGroups[nThreadSelected].emplace_back(&pvProofs->at(i));
+        nThreadSelected++;
+        if (nThreadSelected >= nThreadsUsed)
+            nThreadSelected = 0;
+    }
+
+    boost::thread_group threadGroup;
+    for (unsigned int i = 0; i < vProofGroups.size(); i++) {
+        threadGroup.create_thread([i, &vProofGroups, &vReturn] {
+            return libzerocoin::SerialNumberSoKProof::BatchVerify(vProofGroups[i], &vReturn[i]);
+        });
+    }
+
+    threadGroup.join_all();
+
+    for (auto ret : vReturn) {
+        if (ret != 1)
+            return false;
     }
 
     return true;
@@ -157,9 +203,14 @@ void FindMints(std::vector<CMintMeta> vMintsToFind, std::vector<CMintMeta>& vMin
             continue;
         }
 
-        if (!mapBlockIndex.count(hashBlock)) {
-            vMissingMints.push_back(meta);
-            continue;
+        int nHeight;
+        {
+            LOCK(cs_mapblockindex);
+            if (!mapBlockIndex.count(hashBlock)) {
+                vMissingMints.push_back(meta);
+                continue;
+            }
+            nHeight = mapBlockIndex[hashBlock]->nHeight;
         }
 
         //see if this mint is spent
@@ -199,12 +250,12 @@ void FindMints(std::vector<CMintMeta> vMintsToFind, std::vector<CMintMeta>& vMin
         }
 
         // if meta data is correct, then no need to update
-        if (meta.txid == txHash && meta.nHeight == mapBlockIndex[hashBlock]->nHeight && meta.isUsed == fSpent)
+        if (meta.txid == txHash && meta.nHeight == nHeight && meta.isUsed == fSpent)
             continue;
 
         //mark this mint for update
         meta.txid = txHash;
-        meta.nHeight = mapBlockIndex[hashBlock]->nHeight;
+        meta.nHeight = nHeight;
         meta.isUsed = fSpent;
         LogPrintf("%s: found updates for pubcoinhash = %s\n", __func__, meta.hashPubcoin.GetHex());
 
@@ -232,21 +283,35 @@ bool IsPubcoinInBlockchain(const uint256& hashPubcoin, int& nHeightTx, uint256& 
     return IsTransactionInChain(txid, nHeightTx, txRef, Params().GetConsensus(), pindexChain);
 }
 
+bool IsPubcoinSpendInBlockchain(const uint256& hashPubcoin, int& nHeightTx, uint256& txid, CBlockIndex* pindexChain)
+{
+    uint256 hashBlock;
+    if (!pzerocoinDB->ReadPubcoinSpend(hashPubcoin, txid, hashBlock))
+        return false;
+
+    return IsBlockHashInChain(hashBlock, nHeightTx, pindexChain);
+}
+
 bool IsSerialKnown(const CBigNum& bnSerial)
 {
     uint256 txHash;
     return pzerocoinDB->ReadCoinSpend(bnSerial, txHash);
 }
 
-bool IsSerialInBlockchain(const CBigNum& bnSerial, int& nHeightTx, CBlockIndex* pindex)
+bool IsSerialInBlockchain(const CBigNum& bnSerial, int& nHeightTx, const CBlockIndex* pindex)
+{
+    return IsSerialInBlockchain(GetSerialHash(bnSerial), nHeightTx, pindex);
+}
+
+bool IsSerialInBlockchain(const uint256& hashSerial, int& nHeightTx, const CBlockIndex* pindex, bool log)
 {
     uint256 txHash;
     // if not in zerocoinDB then its not in the blockchain
-    if (!pzerocoinDB->ReadCoinSpend(bnSerial, txHash))
+    if (!pzerocoinDB->ReadCoinSpend(hashSerial, txHash))
         return false;
 
     CTransactionRef txRef;
-    return IsTransactionInChain(txHash, nHeightTx, txRef, Params().GetConsensus(), pindex);
+    return IsTransactionInChain(txHash, nHeightTx, txRef, Params().GetConsensus(), pindex, log);
 }
 
 bool IsSerialInBlockchain(const uint256& hashSerial, int& nHeightTx, uint256& txidSpend)
@@ -300,7 +365,7 @@ std::string ReindexZerocoinDB()
                     //Record Serials
                     if (tx->IsZerocoinSpend()) {
                         for (auto& in : tx->vin) {
-                            if (!in.scriptSig.IsZerocoinSpend())
+                            if (!in.IsZerocoinSpend())
                                 continue;
 
                             auto spend = TxInToZerocoinSpend(in);
@@ -424,7 +489,7 @@ std::list<libzerocoin::CoinDenomination> ZerocoinSpendListFromBlock(const CBlock
             continue;
 
         for (const CTxIn& txin : tx->vin) {
-            if (!txin.scriptSig.IsZerocoinSpend())
+            if (!txin.IsZerocoinSpend())
                 continue;
 
             libzerocoin::CoinDenomination c = libzerocoin::IntToZerocoinDenomination(txin.nSequence&CTxIn::SEQUENCE_LOCKTIME_MASK);

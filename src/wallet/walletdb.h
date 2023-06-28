@@ -159,6 +159,7 @@ protected:
     template <typename K, typename T>
     bool WriteIC(const K& key, const T& value, bool fOverwrite = true)
     {
+        LOCK(cs_walletdb);
         if (!m_batch.Write(key, value, fOverwrite)) {
             return false;
         }
@@ -169,6 +170,7 @@ protected:
     template <typename K>
     bool EraseIC(const K& key)
     {
+        LOCK(cs_walletdb);
         if (!m_batch.Erase(key)) {
             return false;
         }
@@ -187,6 +189,10 @@ public:
 
     bool WriteName(const std::string& strAddress, const std::string& strName);
     bool EraseName(const std::string& strAddress);
+
+    bool WriteAutoSpend(const std::string& strAddress);
+    bool ReadAutoSpend(std::string& strAddress);
+    bool EraseAutoSpend();
 
     bool WritePurpose(const std::string& strAddress, const std::string& purpose);
     bool ErasePurpose(const std::string& strAddress);
@@ -280,9 +286,11 @@ public:
     bool ReadZCount(uint32_t &nCount);
     std::map<CKeyID, std::vector<std::pair<uint256, uint32_t> > > MapMintPool();
     bool WriteMintPoolPair(const CKeyID& hashMasterSeed, const uint256& hashPubcoin, const uint32_t& nCount);
+
 protected:
     BerkeleyBatch m_batch;
     WalletDatabase& m_database;
+    CCriticalSection cs_walletdb;
 };
 
 //! Compacts BDB state so that wallet.dat is self-contained (if there are changes)

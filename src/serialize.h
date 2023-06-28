@@ -241,8 +241,6 @@ template<typename Stream> inline void Unserialize(Stream& s, Span<unsigned char>
 template<typename Stream> inline void Serialize(Stream& s, bool a)    { char f=a; ser_writedata8(s, f); }
 template<typename Stream> inline void Unserialize(Stream& s, bool& a) { char f=ser_readdata8(s); a=f; }
 
-
-
 // Serialization for libzerocoin::CoinDenomination
 inline unsigned int GetSerializeSize(libzerocoin::CoinDenomination a, int, int = 0) { return sizeof(libzerocoin::CoinDenomination); }
 template <typename Stream>
@@ -501,7 +499,8 @@ inline int GetVarInt(const std::vector<uint8_t> &v, size_t ofs, uint64_t &i, siz
     return 0; // 0 == success
 };
 
-#define VARINT(obj, ...) WrapVarInt<__VA_ARGS__>(REF(obj))
+#define VARINT_MODE(obj, mode) WrapVarInt<mode>(REF(obj))
+#define VARINT(obj) WrapVarInt<VarIntMode::DEFAULT>(REF(obj))
 #define COMPACTSIZE(obj) CCompactSize(REF(obj))
 #define LIMITED_STRING(obj,n) LimitedString< n >(REF(obj))
 
@@ -752,7 +751,7 @@ void Unserialize_impl(Stream& is, prevector<N, T>& v, const unsigned char&)
     while (i < nSize)
     {
         unsigned int blk = std::min(nSize - i, (unsigned int)(1 + 4999999 / sizeof(T)));
-        v.resize(i + blk);
+        v.resize_uninitialized(i + blk);
         is.read((char*)&v[i], blk * sizeof(T));
         i += blk;
     }
@@ -770,8 +769,8 @@ void Unserialize_impl(Stream& is, prevector<N, T>& v, const V&)
         nMid += 5000000 / sizeof(T);
         if (nMid > nSize)
             nMid = nSize;
-        v.resize(nMid);
-        for (; i < nMid; i++)
+        v.resize_uninitialized(nMid);
+        for (; i < nMid; ++i)
             Unserialize(is, v[i]);
     }
 }

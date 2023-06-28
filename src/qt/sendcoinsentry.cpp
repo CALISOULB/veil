@@ -33,8 +33,13 @@ SendCoinsEntry::SendCoinsEntry(const PlatformStyle *_platformStyle, QWidget *par
     ui->payTo->setAttribute(Qt::WA_MacShowFocusRect, 0);
     ui->payTo->setProperty("cssClass" , "edit-primary");
 
+    QLocale locale(QLocale::C);
+    locale.setNumberOptions(QLocale::RejectGroupSeparator); // Don't allow commas in the amount
+    auto val = new QDoubleValidator(0, 100000000000, 8, this);
+    val->setLocale(locale);
+
     ui->payAmount->setPlaceholderText("Amount to send");
-    ui->payAmount->setValidator(new QDoubleValidator(0, 100000000000, 7, this) );
+    ui->payAmount->setValidator(val);
     ui->payAmount->setAttribute(Qt::WA_MacShowFocusRect, 0);
     ui->payAmount->setProperty("cssClass" , "edit-primary");
 
@@ -58,12 +63,12 @@ SendCoinsEntry::SendCoinsEntry(const PlatformStyle *_platformStyle, QWidget *par
     ui->payTo_is->setFont(GUIUtil::fixedPitchFont());
 
     // Connect signals
-    //connect(ui->payAmount, SIGNAL(valueChanged()), this, SIGNAL(payAmountChanged()));
+    connect(ui->payAmount, SIGNAL(textChanged(QString)), this, SIGNAL(payAmountChanged()));
     //connect(ui->checkboxSubtractFeeFromAmount, SIGNAL(toggled(bool)), this, SIGNAL(subtractFeeFromAmountChanged()));
     connect(ui->btnRemove, SIGNAL(clicked()), this, SLOT(deleteClicked()));
     connect(ui->deleteButton_is, SIGNAL(clicked()), this, SLOT(deleteClicked()));
     connect(ui->deleteButton_s, SIGNAL(clicked()), this, SLOT(deleteClicked()));
-    connect(ui->btnAddressBook, SIGNAL(clicked()), this, SLOT(on_addressBookButton_clicked()));
+    connect(ui->btnAddressBook, SIGNAL(clicked()), this, SLOT(onAddressBookButtonClicked()));
     //connect(ui->useAvailableBalanceButton, SIGNAL(clicked()), this, SLOT(useAvailableBalanceClicked()));
 }
 
@@ -72,7 +77,7 @@ SendCoinsEntry::~SendCoinsEntry()
     delete ui;
 }
 
-void SendCoinsEntry::on_addressBookButton_clicked()
+void SendCoinsEntry::onAddressBookButtonClicked()
 {
     if(!model)
         return;

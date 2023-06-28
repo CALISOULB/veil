@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/addressreceive.h>
 #include <qt/veil/forms/ui_addressreceive.h>
 
@@ -28,9 +32,9 @@
 
 AddressReceive::AddressReceive(QWidget *parent, WalletModel* _walletModel, bool isMinerAddress) :
     QDialog(parent),
+    ui(new Ui::AddressReceive),
     walletModel(_walletModel),
-    isMiner(isMinerAddress),
-    ui(new Ui::AddressReceive)
+    isMiner(isMinerAddress)
 {
     ui->setupUi(this);
 
@@ -46,7 +50,7 @@ AddressReceive::AddressReceive(QWidget *parent, WalletModel* _walletModel, bool 
     ui->labelTitle->setText(isMinerAddress ? "New Miner Address" : "New Receiving Address");
     generateNewAddress(isMinerAddress);
 
-    connect(ui->btnCopy, SIGNAL(clicked()),this, SLOT(on_btnCopyAddress_clicked()));
+    connect(ui->btnCopy, SIGNAL(clicked()),this, SLOT(onBtnCopyAddressClicked()));
     connect(ui->btnSave, SIGNAL(clicked()),this, SLOT(onBtnSaveClicked()));
 
 }
@@ -55,7 +59,7 @@ void AddressReceive::onBtnSaveClicked(){
     std::string label = ui->editDescription->text().toUtf8().constData();
     interfaces::Wallet& wallet = walletModel->wallet();
     if(isMiner){
-        wallet.setAddressBook(dest, label, "basecoin", false);
+        wallet.setAddressBook(dest, label, "receive_miner", false);
     }else{
         wallet.setAddressBook(dest, label, "receive", true);
     }
@@ -63,7 +67,7 @@ void AddressReceive::onBtnSaveClicked(){
     accept();
 }
 
-void AddressReceive::on_btnCopyAddress_clicked() {
+void AddressReceive::onBtnCopyAddressClicked() {
     if(!qAddress.isEmpty()) {
         GUIUtil::setClipboard(qAddress);
         openToastDialog("Address copied", this);
@@ -101,7 +105,7 @@ void AddressReceive::generateNewAddress(bool isMinerAddress){
         }else {
             wallet.learnRelatedScripts(newKey, OutputType::LEGACY);
             dest = newKey.GetID();
-            wallet.setAddressBook(dest, "", "basecoin");
+            wallet.setAddressBook(dest, "", "receive_miner");
             bool fBech32 = false;
             strAddress = EncodeDestination(dest, fBech32);
         }

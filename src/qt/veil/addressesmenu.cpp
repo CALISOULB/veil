@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #include <qt/veil/addressesmenu.h>
 #include <qt/veil/forms/ui_addressesmenu.h>
 
@@ -11,38 +15,50 @@
 
 AddressesMenu::AddressesMenu(const QString _type, const QModelIndex &_index, QWidget *parent, WalletView *_mainWindow, AddressTableModel *_model) :
     QWidget(parent),
+    ui(new Ui::AddressesMenu),
     mainWindow(_mainWindow),
-    type(_type),
     index(_index),
+    type(_type),
     model(_model),
-    ui(new Ui::AddressesMenu)
+	timeoutTimer(0)
+
 {
     ui->setupUi(this);
 
-    connect(ui->btnCopy,SIGNAL(clicked()),this,SLOT(on_btnCopyAddress_clicked()));
-    connect(ui->btnDelete,SIGNAL(clicked()),this,SLOT(on_btnDeleteAddress_clicked()));
-    connect(ui->btnEdit,SIGNAL(clicked()),this,SLOT(on_btnEditAddress_clicked()));
+    timeoutTimer = new QTimer(this);
+    connect(timeoutTimer, SIGNAL(timeout()), this, SLOT(hide()));
+
+    connect(ui->btnCopy,SIGNAL(clicked()),this,SLOT(onBtnCopyAddressClicked()));
+    connect(ui->btnDelete,SIGNAL(clicked()),this,SLOT(onBtnDeleteAddressClicked()));
+    connect(ui->btnEdit,SIGNAL(clicked()),this,SLOT(onBtnEditAddressClicked()));
 
     if(AddressTableModel::Receive == type){
         ui->btnDelete->setVisible(false);
     }
 }
 
-void AddressesMenu::on_btnDeleteAddress_clicked(){
+void AddressesMenu::onBtnDeleteAddressClicked(){
     if(this->model->removeRows(index.row(), 1, index)){
         openToastDialog("Address deleted", this->mainWindow);
     }
     hide();
 }
 
-void AddressesMenu::on_btnEditAddress_clicked(){
+void AddressesMenu::onBtnEditAddressClicked(){
     auto address = this->model->index(index.row(), AddressTableModel::Address, index);
     QString addressStr = this->model->data(address, Qt::DisplayRole).toString();
+
+
+    auto isMinerAddress = this->model->index(index.row(), AddressTableModel::Is_Basecoin, index);
+    bool isMiner = this->model->data(isMinerAddress, Qt::DisplayRole).toBool();
 
     this->mainWindow->getGUI()->showHide(true);
     std::string purpose;
     if(AddressTableModel::Receive == type){
-        purpose = "receive";
+        if(isMiner){
+            purpose = "receive_miner";
+        }else
+            purpose = "receive";
     }else{
         purpose = "send";
     }
@@ -53,7 +69,7 @@ void AddressesMenu::on_btnEditAddress_clicked(){
     hide();
 }
 
-void AddressesMenu::on_btnCopyAddress_clicked(){
+void AddressesMenu::onBtnCopyAddressClicked(){
     auto address = this->model->index(index.row(), AddressTableModel::Address, index);
     QString addressStr = this->model->data(address, Qt::DisplayRole).toString();
     GUIUtil::setClipboard(addressStr);
@@ -70,7 +86,15 @@ void AddressesMenu::setInitData(const QModelIndex &_index, AddressTableModel *_m
 }
 
 void AddressesMenu::showEvent(QShowEvent *event){
-    QTimer::singleShot(3500, this, SLOT(hide()));
+	timeoutTimer->start(3500);
+}
+
+void AddressesMenu::enterEvent(QEvent *event){
+	timeoutTimer->stop();
+}
+
+void AddressesMenu::leaveEvent(QEvent *event){
+	hide();
 }
 
 AddressesMenu::~AddressesMenu() {

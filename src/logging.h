@@ -55,6 +55,11 @@ namespace BCLog {
         LEVELDB     = (1 << 20),
         ZEROCOINDB  = (1 << 21),
         BLOCKCREATION = (1 << 22),
+        CHAINSCORE = (1 << 23),
+        STAGING     = (1 << 24),
+        MINING      = (1 << 25),
+        STAKING     = (1 << 26),
+        RINGCT      = (1 << 27),
         ALL         = ~(uint32_t)0,
     };
 

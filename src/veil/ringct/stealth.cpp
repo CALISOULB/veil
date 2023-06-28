@@ -1,6 +1,6 @@
 // Copyright (c) 2014 The ShadowCoin developers
 // Copyright (c) 2017-2019 The Particl developers
-// Copyright (c) 2018-2019 Veil developers
+// Copyright (c) 2018-2019 The Veil developers
 // Distributed under the MIT/X11 software license, see the accompanying
 // file license.txt or http://www.opensource.org/licenses/mit-license.php.
 
@@ -257,8 +257,12 @@ int StealthSecret(const CKey &secret, const ec_point &pubkey, const ec_point &pk
     uint8_t tmp33[33];
     secp256k1_ec_pubkey_serialize(secp256k1_ctx_stealth, tmp33, &len, &Q, SECP256K1_EC_COMPRESSED); // Returns: 1 always.
 
-    sharedSOut.MakeNewKey(true); //initialize the key
-    CSHA256().Write(tmp33, 33).Finalize(sharedSOut.begin_nc());
+    std::vector<unsigned char> vKey;
+    vKey.resize(32);
+    CSHA256().Write(tmp33, 33).Finalize(vKey.data());
+    memcpy(sharedSOut.begin_nc(), vKey.data(), 32);
+    sharedSOut.SetFlags(/*valide*/true, /*compressed*/true);
+    vKey.clear();
 
     //if (!secp256k1_ec_seckey_verify(secp256k1_ctx_stealth, sharedSOut.begin()))
     //    return errorN(1, "%s: secp256k1_ec_seckey_verify failed.", __func__); // Start again with a new ephemeral key
@@ -429,8 +433,8 @@ bool ExtractStealthPrefix(const char *pPrefix, uint32_t &nPrefix)
     return true;
 };
 
-int MakeStealthData(const std::string &sNarration, stealth_prefix prefix, const CKey &sShared, const CPubKey &pkEphem,
-                    std::vector<uint8_t> &vData, uint32_t &nStealthPrefix, std::string &sError)
+bool MakeStealthData(const std::string &sNarration, stealth_prefix prefix, const CKey &sShared, const CPubKey &pkEphem,
+                     std::vector<uint8_t> &vData, uint32_t &nStealthPrefix, std::string &sError)
 {
     std::vector<uint8_t> vchNarr;
 
@@ -441,10 +445,10 @@ int MakeStealthData(const std::string &sNarration, stealth_prefix prefix, const 
 //        crypter.SetKey(sShared.begin(), pkEphem.begin());
 //
 //        if (!crypter.Encrypt((uint8_t*)sNarration.data(), sNarration.length(), vchNarr))
-//            return errorN(1, sError, __func__, "Narration encryption failed.");
+//            return errorN(false, sError, __func__, "Narration encryption failed.");
 //
 //        if (vchNarr.size() > MAX_STEALTH_NARRATION_SIZE)
-//            return errorN(1, sError, __func__, "Encrypted narration is too long.");
+//            return errorN(false, sError, __func__, "Encrypted narration is too long.");
 //    };
 
     vData.resize(34
@@ -471,7 +475,7 @@ int MakeStealthData(const std::string &sNarration, stealth_prefix prefix, const 
         o += vchNarr.size();
     };
 
-    return 0;
+    return true;
 };
 
 int PrepareStealthOutput(const CStealthAddress &sx, const std::string &sNarration,
@@ -492,7 +496,7 @@ int PrepareStealthOutput(const CStealthAddress &sx, const std::string &sNarratio
     scriptPubKey = GetScriptForDestination(CPubKey(pkSendTo).GetID());
 
     uint32_t nStealthPrefix;
-    if (0 != MakeStealthData(sNarration, sx.prefix, sShared, pkEphem, vData, nStealthPrefix, sError))
+    if (!MakeStealthData(sNarration, sx.prefix, sShared, pkEphem, vData, nStealthPrefix, sError))
         return 1;
     return 0;
 }

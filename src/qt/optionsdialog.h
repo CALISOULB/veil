@@ -60,6 +60,9 @@ private Q_SLOTS:
     /* query the networks, for which the default proxy is used */
     void updateDefaultProxyNets();
 
+    void onHideOrphansCheck(bool state);
+    void onShowComputeTimeCheck(bool state);
+
 Q_SIGNALS:
     void proxyIpChecks(QValidatedLineEdit *pUiProxyIp, int nProxyPort);
 

@@ -1,4 +1,5 @@
 // Copyright (c) 2011-2019 The Bitcoin Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -121,7 +122,7 @@ void setupAddressWidget(QValidatedLineEdit *widget, QWidget *parent)
     //widget->setFont(fixedPitchFont());
     // We don't want translators to use own addresses in translations
     // and this is the only place, where this address is supplied.
-    widget->setPlaceholderText(QObject::tr("Enter a Veil address (e.g. %1)").arg(
+    widget->setPlaceholderText(QObject::tr("Enter a Veil stealth address (e.g. %1)").arg(
         QString::fromStdString(DummyAddress(Params()))));
     widget->setValidator(new BitcoinAddressEntryValidator(parent));
     widget->setCheckValidator(new BitcoinAddressCheckValidator(parent));
@@ -538,6 +539,8 @@ fs::path static StartupShortcutPath()
         return GetSpecialFolderPath(CSIDL_STARTUP) / "Veil.lnk";
     if (chain == CBaseChainParams::TESTNET) // Remove this special case when CBaseChainParams::TESTNET = "testnet4"
         return GetSpecialFolderPath(CSIDL_STARTUP) / "Veil (testnet).lnk";
+    if (chain == CBaseChainParams::DEVNET) 
+        return GetSpecialFolderPath(CSIDL_STARTUP) / "Veil (devnet).lnk";
     return GetSpecialFolderPath(CSIDL_STARTUP) / strprintf("Veil (%s).lnk", chain);
 }
 
@@ -570,8 +573,8 @@ bool SetStartOnSystemStartup(bool fAutoStart)
 
             // Start client minimized
             QString strArgs = "-min";
-            // Set -testnet /-regtest options
-            strArgs += QString::fromStdString(strprintf(" -testnet=%d -regtest=%d", gArgs.GetBoolArg("-testnet", false), gArgs.GetBoolArg("-regtest", false)));
+            // Set -testnet /-regtest /-devnet  options
+            strArgs += QString::fromStdString(strprintf(" -testnet=%d -regtest=%d -devnet=%d", gArgs.GetBoolArg("-testnet", false), gArgs.GetBoolArg("-regtest", false), gArgs.GetBoolArg("-devnet", false)));
 
 #ifdef UNICODE
             boost::scoped_array<TCHAR> args(new TCHAR[strArgs.length() + 1]);
@@ -681,7 +684,7 @@ bool SetStartOnSystemStartup(bool fAutoStart)
             optionFile << "Name=Veil\n";
         else
             optionFile << strprintf("Name=Veil (%s)\n", chain);
-        optionFile << "Exec=" << pszExePath << strprintf(" -min -testnet=%d -regtest=%d\n", gArgs.GetBoolArg("-testnet", false), gArgs.GetBoolArg("-regtest", false));
+        optionFile << "Exec=" << pszExePath << strprintf(" -min -testnet=%d -regtest=%d -devnet=%d\n", gArgs.GetBoolArg("-testnet", false), gArgs.GetBoolArg("-regtest", false), gArgs.GetBoolArg("-devnet", false));
         optionFile << "Terminal=false\n";
         optionFile << "Hidden=false\n";
         optionFile.close();
@@ -919,7 +922,7 @@ qreal calculateIdealFontSize(int width, const QString& text, QFont font, qreal m
     while(font_size >= minPointSize) {
         font.setPointSizeF(font_size);
         QFontMetrics fm(font);
-        if (fm.width(text) < width) {
+        if (TextWidth(fm, text) < width) {
             break;
         }
         font_size -= 0.5;
@@ -945,6 +948,15 @@ bool ItemDelegate::eventFilter(QObject *object, QEvent *event)
         }
     }
     return QItemDelegate::eventFilter(object, event);
+}
+
+int TextWidth(const QFontMetrics& fm, const QString& text)
+{
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 11, 0))
+    return fm.horizontalAdvance(text);
+#else
+    return fm.width(text);
+#endif
 }
 
 } // namespace GUIUtil

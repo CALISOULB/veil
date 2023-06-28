@@ -1,3 +1,7 @@
+// Copyright (c) 2019 The Veil developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
 #ifndef BALANCE_H
 #define BALANCE_H
 
@@ -29,6 +33,8 @@ public:
     void setClientModel(ClientModel *clientModel);
     void setWalletModel(WalletModel *walletModel);
     void refreshWalletStatus();
+    bool eventFilter(QObject *obj, QEvent *event);
+    void setDisplayRcvAddress(CTxDestination *displayAddress);
 
 public Q_SLOTS:
     void setBalance(const interfaces::WalletBalances& balances);
@@ -36,7 +42,7 @@ public Q_SLOTS:
     void onBtnBalanceClicked();
     void onBtnUnconfirmedClicked();
     void onBtnImmatureClicked();
-    void on_btnCopyAddress_clicked();
+    void onBtnCopyAddressClicked();
 
 private:
     Ui::Balance *ui;
@@ -53,6 +59,9 @@ private:
     TooltipBalance *tooltip = nullptr;
 
     void onBtnBalanceClicked(int type);
+
+    bool displayAddressSet = false;
+    CTxDestination currentDisplayAddress;
 };
 
 #endif // BALANCE_H

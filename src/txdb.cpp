@@ -1,5 +1,6 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2019 The Bitcoin Core developers
+// Copyright (c) 2019-2020 The Veil developers
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
@@ -18,6 +19,7 @@
 
 #include <boost/thread.hpp>
 #include <primitives/zerocoin.h>
+#include <veil/invalid.h>
 
 static const char DB_COIN = 'C';
 static const char DB_ADDRESSINDEX = 'a';
@@ -35,6 +37,9 @@ static const char DB_HEAD_BLOCKS = 'H';
 static const char DB_FLAG = 'F';
 static const char DB_REINDEX_FLAG = 'R';
 static const char DB_LAST_BLOCK = 'l';
+
+static const char DB_BLACKLISTOUT = 'X';
+static const char DB_BLACKLISTPUB = 'P';
 
 namespace {
 
@@ -236,6 +241,14 @@ bool CBlockTreeDB::WriteBatchSync(const std::vector<std::pair<int, const CBlockF
     }
     batch.Write(DB_LAST_BLOCK, nLastFile);
     for (std::vector<const CBlockIndex*>::const_iterator it=blockinfo.begin(); it != blockinfo.end(); it++) {
+        CDiskBlockIndex diskindex = CDiskBlockIndex(*it);
+        CBlockHeader bHeader = (*it)->GetBlockHeader();
+        uint256 hashBlock = diskindex.GetBlockHash();
+        if (arith_uint256(hashBlock.GetHex()) != arith_uint256((*it)->GetBlockHeader().GetHash().GetHex())) {
+            LogPrintf("%s: *** Warning - Block %d: Hash: %s doesn't match Header Hash: %s\n", __func__,
+                      diskindex.nHeight, hashBlock.GetHex(), bHeader.GetHash().GetHex());
+            continue; // Don't write it
+        }
         batch.Write(std::make_pair(DB_BLOCK_INDEX, (*it)->GetBlockHash()), CDiskBlockIndex(*it));
     }
     return WriteBatch(batch, true);
@@ -258,6 +271,8 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
     std::unique_ptr<CDBIterator> pcursor(NewIterator());
 
     pcursor->Seek(std::make_pair(DB_BLOCK_INDEX, uint256()));
+    
+    std::set<uint256> setBlockHash;
 
     // Load mapBlockIndex
     while (pcursor->Valid()) {
@@ -266,6 +281,16 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
         if (pcursor->GetKey(key) && key.first == DB_BLOCK_INDEX) {
             CDiskBlockIndex diskindex;
             if (pcursor->GetValue(diskindex)) {
+                // For some reason Veil has a tendency to duplicate an index, and store the second under a different key
+                // ignore any duplicates and mark them to be erased
+                uint256 hashBlock = diskindex.GetBlockHash();
+                if (hashBlock != key.second) {
+                    LogPrintf("%s: Skipping Block %d (status=%d): %s - Block Hash does not match Index Key\n",
+                               __func__, diskindex.nHeight, diskindex.nStatus, hashBlock.GetHex());
+                    pcursor->Next();
+                    continue;
+                }
+
                 // Construct block index object
                 CBlockIndex* pindexNew = insertBlockIndex(diskindex.GetBlockHash());
                 pindexNew->pprev          = insertBlockIndex(diskindex.hashPrev);
@@ -289,6 +314,7 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
                 pindexNew->nMint = diskindex.nMint;
                 pindexNew->nMoneySupply = diskindex.nMoneySupply;
                 pindexNew->fProofOfStake = diskindex.fProofOfStake;
+                pindexNew->vHashProof = diskindex.vHashProof;
 
                 //PoFN
                 pindexNew->fProofOfFullNode = diskindex.fProofOfFullNode;
@@ -298,8 +324,13 @@ bool CBlockTreeDB::LoadBlockIndexGuts(const Consensus::Params& consensusParams, 
 
                 // zerocoin
                 pindexNew->mapAccumulatorHashes = diskindex.mapAccumulatorHashes;
+                pindexNew->hashAccumulators = diskindex.hashAccumulators;
                 pindexNew->mapZerocoinSupply = diskindex.mapZerocoinSupply;
                 pindexNew->vMintDenominationsInBlock = diskindex.vMintDenominationsInBlock;
+
+                // ProgPow
+                pindexNew->nNonce64         = diskindex.nNonce64;
+                pindexNew->mixHash          = diskindex.mixHash;
 
 //                if (pindexNew->IsProofOfWork() && !CheckProofOfWork(pindexNew->GetBlockPoWHash(), pindexNew->nBits, consensusParams))
 //                    return error("%s: CheckProofOfWork failed: %s", __func__, pindexNew->ToString());
@@ -423,7 +454,7 @@ public:
                 ::Unserialize(s, CTxOutCompressor(vout[i]));
         }
         // coinbase height
-        ::Unserialize(s, VARINT(nHeight, VarIntMode::NONNEGATIVE_SIGNED));
+        ::Unserialize(s, VARINT_MODE(nHeight, VarIntMode::NONNEGATIVE_SIGNED));
     }
 };
 
@@ -573,6 +604,32 @@ bool CZerocoinDB::EraseCoinSpend(const CBigNum& bnSerial)
     return Erase(std::make_pair('s', hash));
 }
 
+bool CZerocoinDB::WritePubcoinSpendBatch(std::map<uint256, uint256>& mapPubcoinSpends, const uint256& hashBlock)
+{
+    CDBBatch batch(*this);
+    for (const auto& pair : mapPubcoinSpends) {
+        const uint256& hashPubcoin = pair.first;
+        const uint256& txid = pair.second;
+        batch.Write(std::make_pair('l', hashPubcoin), std::make_pair(txid, hashBlock));
+    }
+    return WriteBatch(batch, true);
+}
+
+bool CZerocoinDB::ReadPubcoinSpend(const uint256& hashPubcoin, uint256& txHash, uint256& hashBlock)
+{
+    std::pair<uint256, uint256> pairTxHashblock;
+    if (!Read(std::make_pair('l', hashPubcoin), pairTxHashblock))
+        return false;
+    txHash = pairTxHashblock.first;
+    hashBlock = pairTxHashblock.second;
+    return true;
+}
+
+bool CZerocoinDB::ErasePubcoinSpend(const uint256& hashPubcoin)
+{
+    return Erase(std::make_pair('l', hashPubcoin));
+}
+
 bool CZerocoinDB::WipeCoins(std::string strType)
 {
     if (strType != "spends" && strType != "mints")
@@ -589,7 +646,7 @@ bool CZerocoinDB::WipeCoins(std::string strType)
     while (pcursor->Valid()) {
         boost::this_thread::interruption_point();
         try {
-            char chType;
+            char chType = 0;
             pcursor->GetKey(chType);
 
             if (chType == type) {
@@ -628,4 +685,89 @@ bool CZerocoinDB::EraseAccumulatorValue(const uint256& hashChecksum)
 {
     LogPrint(BCLog::ZEROCOINDB, "%s : checksum:%d\n", __func__, hashChecksum.GetHex());
     return Erase(std::make_pair('2', hashChecksum));
+}
+
+bool CZerocoinDB::LoadBlacklistOutPoints()
+{
+    std::unique_ptr<CDBIterator> pcursor(NewIterator());
+    pcursor->Seek(std::make_pair(DB_BLACKLISTOUT, COutPoint()));
+
+    while (pcursor->Valid()) {
+        boost::this_thread::interruption_point();
+        std::pair<char, COutPoint> key;
+
+        if (pcursor->GetKey(key) && key.first == DB_BLACKLISTOUT) {
+            int nType;
+            if (pcursor->GetValue(nType)) {
+                switch(nType) {
+                    case OUTPUT_STANDARD : {
+                        blacklist::AddBasecoinOutPoint(key.second);
+                    }
+                    case OUTPUT_CT : {
+                        blacklist::AddStealthOutPoint(key.second);
+                    }
+                    case OUTPUT_RINGCT : {
+                        blacklist::AddRctOutPoint(key.second);
+                    }
+                    default: {
+                        //nothing
+                    }
+                }
+                pcursor->Next();
+            } else {
+                return error("failed to read blacklist outpoints");
+            }
+        } else {
+            break;
+        }
+    }
+    return true;
+}
+
+bool CZerocoinDB::LoadBlacklistPubcoins()
+{
+    std::unique_ptr<CDBIterator> pcursor(NewIterator());
+    pcursor->Seek(std::make_pair(DB_BLACKLISTPUB, uint256()));
+
+    while (pcursor->Valid()) {
+        boost::this_thread::interruption_point();
+        std::pair<char, uint256> key;
+
+        if (pcursor->GetKey(key) && key.first == DB_BLACKLISTPUB) {
+            int value;
+            if (pcursor->GetValue(value)) {
+                blacklist::AddPubcoinHash(key.second);
+            } else {
+                return error("failed to read blacklisted pubcoins");
+            }
+            pcursor->Next();
+        } else {
+            break;
+        }
+    }
+    return true;
+}
+
+bool CZerocoinDB::WriteBlacklistedOutpoint(const COutPoint& outpoint, int nType)
+{
+    CDBBatch batch(*this);
+    batch.Write(std::make_pair(DB_BLACKLISTOUT, outpoint), nType);
+    return WriteBatch(batch);
+}
+
+bool CZerocoinDB::EraseBlacklistedOutpoint(const COutPoint& outpoint)
+{
+    return Erase(std::make_pair(DB_BLACKLISTOUT, outpoint));
+}
+
+bool CZerocoinDB::WriteBlacklistedPubcoin(const uint256& hashPubcoin)
+{
+    CDBBatch batch(*this);
+    batch.Write(std::make_pair(DB_BLACKLISTPUB, hashPubcoin), int()); //have to add value? only need key
+    return WriteBatch(batch);
+}
+
+bool CZerocoinDB::EraseBlacklisterPubcoin(const uint256& hashPubcoin)
+{
+    return Erase(std::make_pair(DB_BLACKLISTPUB, hashPubcoin));
 }

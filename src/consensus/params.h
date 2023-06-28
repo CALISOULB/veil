@@ -18,6 +18,8 @@ enum DeploymentPos
     DEPLOYMENT_TESTDUMMY,
     DEPLOYMENT_CSV, // Deployment of BIP68, BIP112, and BIP113.
     DEPLOYMENT_SEGWIT, // Deployment of BIP141, BIP143, and BIP147.
+    DEPLOYMENT_POS_WEIGHT,
+    DEPLOYMENT_ZC_LIMP,
     // NOTE: Also add new deployments to VersionBitsDeploymentInfo in versionbits.cpp
     MAX_VERSION_BITS_DEPLOYMENTS
 };
@@ -68,14 +70,23 @@ struct Params {
     BIP9Deployment vDeployments[MAX_VERSION_BITS_DEPLOYMENTS];
     /** Proof of work parameters */
     uint256 powLimit;
+    uint256 powLimitRandomX;
+    uint256 powLimitProgPow;
+    uint256 powLimitSha256;
+
     bool fPowAllowMinDifficultyBlocks;
     bool fPowNoRetargeting;
     int64_t nDgwPastBlocks;
+    int64_t nDgwPastBlocks_old;
     int64_t nPowTargetSpacing;
     uint256 nMinimumChainWork;
     uint256 defaultAssumeValid;
 
     int nMinRCTOutputDepth;
+
+    int64_t nProgPowTargetSpacing;
+    int64_t nRandomXTargetSpacing;
+    int64_t nSha256DTargetSpacing;
 };
 } // namespace Consensus
 

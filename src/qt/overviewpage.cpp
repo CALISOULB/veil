@@ -21,6 +21,14 @@
 
 #include <QAbstractItemDelegate>
 #include <QPainter>
+#include <QSettings>
+#include <QDesktopWidget>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
+#include <QPixmap>
+
+#include <QDebug>
+
 
 #define DECORATION_SIZE 54
 #define NUM_ITEMS 3
@@ -48,6 +56,9 @@ public:
         QRect decorationRect(mainRect.topLeft(), QSize(DECORATION_SIZE, DECORATION_SIZE));
 
 
+        QString feeStr = index.data(TransactionTableModel::FeeRole).toString();
+
+
         QColor foreground;
         // Special treatment for the selected state
         if (option.state & QStyle::State_Selected) {
@@ -71,13 +82,40 @@ public:
         iconRect.setLeft(iconRect.left() + 16);
         QRect decorationRect1(iconRect.topLeft(), QSize(decorationSize, decorationSize));
 
-        int xspace = DECORATION_SIZE + 8;
-        int ypad = 6;
-        int halfheight = (mainRect.height() - 2*ypad)/2;
-        QRect amountRect(mainRect.left() + xspace, mainRect.top()+ypad, mainRect.width() - xspace - 16, halfheight);
-        QRect dateRect(mainRect.left() + xspace, mainRect.top()+ypad+halfheight, mainRect.width() - xspace - 16, halfheight);
-        QRect addressRect(mainRect.left() + decorationSize + ypad  + 16, mainRect.top()+(halfheight - ypad), mainRect.width() - xspace, halfheight);
-        //icon = platformStyle->SingleColorIcon(icon);
+        // set the font size.
+        QFont font = painter->font() ;
+        font.setPointSize(15);
+        painter->setFont(font);
+       
+        // Format the amount.
+        qint64 amount = index.data(TransactionTableModel::AmountRole).toLongLong();
+        QString amountText = BitcoinUnits::formatWithUnit(unit, amount, true, BitcoinUnits::separatorAlways);
+
+        // Get the width of the amount string
+        QFontMetrics fm(painter->fontMetrics());
+        int amountTextLength = GUIUtil::TextWidth(fm, amountText);
+
+        // Get the width of the fee string.
+        int feeTextLength = GUIUtil::TextWidth(fm, feeStr);      
+        
+        int iconWidth = (DECORATION_SIZE / 2)+8;  
+
+        // Calculate the column widths.
+        int columnTwoWidth = (amountTextLength > feeTextLength ? amountTextLength : feeTextLength) + 10;
+        int columnOneWidth =  (mainRect.width() - iconWidth - columnTwoWidth) - 10;
+
+        // Calculate the row heights.
+        int halfHeight = mainRect.height() / 2;
+
+        // Line 1 textareas
+        QRect addressRect(mainRect.left() + iconWidth, mainRect.top(), columnOneWidth, halfHeight);
+        QRect amountRect(mainRect.left() + iconWidth + columnOneWidth - 10, mainRect.top(), columnTwoWidth, halfHeight);
+
+        // Line 2 textareas
+        int secondRowTop = (mainRect.top() + halfHeight);
+        QRect dateRect(mainRect.left() + iconWidth, secondRowTop, columnOneWidth, halfHeight);
+        QRect feeRect(mainRect.left() + iconWidth + columnOneWidth - 10, secondRowTop, columnTwoWidth, halfHeight);
+
         icon.paint(painter, decorationRect1);
 
         QDateTime date = index.data(TransactionTableModel::DateRole).toDateTime();
@@ -87,7 +125,6 @@ public:
         QModelIndex header = index.sibling(index.row(), 3);
         QString message = header.data(Qt::DisplayRole).toString();
 
-        qint64 amount = index.data(TransactionTableModel::AmountRole).toLongLong();
         bool confirmed = index.data(TransactionTableModel::ConfirmedRole).toBool();
         QVariant value = index.data(Qt::ForegroundRole);
 
@@ -115,26 +152,17 @@ public:
             address = "  " + message + " " + address;
         }
 
-        QFont fontTemp = painter->font() ;
-        QFont font = painter->font() ;
-        /* twice the size than the current font size */
-        font.setPointSize(14);
-
-        /* set the modified font to the painter */
-        painter->setFont(font);
-
-        painter->drawText(addressRect, Qt::AlignLeft|Qt::AlignVCenter, address, &boundingRect);
+        painter->drawText(addressRect, Qt::AlignLeft|Qt::AlignTop, address, &boundingRect);
 
 
         if (index.data(TransactionTableModel::WatchonlyRole).toBool())
         {
             QIcon iconWatchonly = qvariant_cast<QIcon>(index.data(TransactionTableModel::WatchonlyDecorationRole));
-            QRect watchonlyRect(boundingRect.right() + 5, mainRect.top()+ypad+halfheight, 16, halfheight);
+            QRect watchonlyRect(boundingRect.right() + 5, mainRect.top() + halfHeight, 16, halfHeight);
             iconWatchonly.paint(painter, watchonlyRect);
         }
 
         // TODO: Change this balance calculation
-        QString amountText = BitcoinUnits::formatWithUnit(unit, amount, true, BitcoinUnits::separatorAlways);
         if(amount < 0) {
             foreground = COLOR_NEGATIVE;
         }
@@ -146,11 +174,21 @@ public:
         }
         painter->setPen(foreground);
 
-        painter->drawText(amountRect, Qt::AlignRight|Qt::AlignVCenter, amountText);
+        painter->drawText(amountRect, Qt::AlignRight|Qt::AlignTop, amountText);
 
         // Draw the date
-        painter->setPen(QColor("#707070"));//option.palette.color(QPalette::Text));
-        painter->drawText(dateRect, Qt::AlignRight|Qt::AlignVCenter, GUIUtil::dateTimeStr(date));
+        painter->setPen(QColor("#707070"));
+
+        /* twice the size than the current font size */
+        //font.setPointSize(14);
+        /* set the modified font to the painter */
+        //painter->setFont(font);
+
+        QString dateStr = "  " + GUIUtil::dateTimeStr(date);
+        painter->drawText(dateRect, Qt::AlignLeft|Qt::AlignBottom, dateStr);
+
+        // fee
+        painter->drawText(feeRect, Qt::AlignRight|Qt::AlignBottom, feeStr);
 
         // Separator
         QPen _gridPen = QPen(COLOR_UNCONFIRMED, 0, Qt::SolidLine);
@@ -166,7 +204,8 @@ public:
 
     inline QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
     {
-        return QSize(DECORATION_SIZE, DECORATION_SIZE);
+        int yScalingFactor = (qApp->desktop()->logicalDpiX() / 2) + 5;
+        return QSize(DECORATION_SIZE, yScalingFactor);
     }
 
     int unit;
@@ -177,8 +216,8 @@ public:
 
 OverviewPage::OverviewPage(const PlatformStyle *platformStyle, WalletView *parent) :
     QWidget(parent),
-    mainWindow(parent),
     ui(new Ui::OverviewPage),
+    mainWindow(parent),
     clientModel(0),
     walletModel(0),
     txdelegate(new TxViewDelegate(platformStyle, this))
@@ -189,14 +228,130 @@ OverviewPage::OverviewPage(const PlatformStyle *platformStyle, WalletView *paren
 
     // Sort
     ui->comboSort->setProperty("cssClass" , "btn-text-primary-inactive");
-    ui->comboSort->addItem(tr("Sort By"));
+    ui->comboSort->addItem(tr("Sort by"));
     ui->comboSort->addItem(tr("Date"));
     ui->comboSort->addItem(tr("Amount"));
     for (int i = 0 ; i < ui->comboSort->count() ; ++i) {
        ui->comboSort->setItemData(i, Qt::AlignRight, Qt::TextAlignmentRole);
     }
+
+    // Filter
+    ui->comboFilter->setProperty("cssClass" , "btn-text-primary-inactive");
+
+    // Filter Default Option
+    ui->comboFilter->addItem(tr("Filter type"), TransactionFilterProxy::ALL_TYPES);
+
+
+    ui->comboFilter->addItem(tr("Sent"),
+        TransactionFilterProxy::TYPE(TransactionRecord::SendToAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::SendToOther) |
+        TransactionFilterProxy::TYPE(TransactionRecord::SendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTSendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTSendToAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTSendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTSendToAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpend) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpendSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpend)
+    );
+
+
+    ui->comboFilter->addItem(tr("Received"),
+        TransactionFilterProxy::TYPE(TransactionRecord::RecvWithAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RecvFromOther) |
+        TransactionFilterProxy::TYPE(TransactionRecord::SendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTSendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTRecvWithAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTGenerated) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTSendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTRecvWithAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTGenerated) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMint) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpendRemint) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinRecv) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinStake) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertBasecoinToCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertBasecoinToRingCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertCtToRingCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertCtToBasecoin) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertRingCtToCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertRingCtToBasecoin) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertZerocoinToCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromRingCt)
+    );
+
+    ui->comboFilter->addItem(tr("Mined"),
+        TransactionFilterProxy::TYPE(TransactionRecord::Generated)
+    );
+
+    ui->comboFilter->addItem(tr("Minted"),
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMint) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpendRemint) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromRingCt)
+    );
+
+    ui->comboFilter->addItem(tr("Stake"),
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinStake)
+    );
+
+    ui->comboFilter->addItem(tr("Basecoin"),
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertBasecoinToCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertBasecoinToRingCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertCtToBasecoin) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertRingCtToBasecoin)
+    );
+
+
+    ui->comboFilter->addItem(tr("CT"),
+        TransactionFilterProxy::TYPE(TransactionRecord::CTSendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTSendToAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTRecvWithAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::CTGenerated) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertBasecoinToCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertCtToRingCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertCtToBasecoin) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertZerocoinToCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertRingCtToCt)
+    );
+
+    ui->comboFilter->addItem(tr("RingCT"),
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTSendToSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTSendToAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTRecvWithAddress) |
+        TransactionFilterProxy::TYPE(TransactionRecord::RingCTGenerated) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertBasecoinToRingCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertCtToRingCT) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertRingCtToCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertRingCtToBasecoin) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromRingCt)
+    );
+
+    ui->comboFilter->addItem(tr("Zerocoin"),
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMint) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpendRemint) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromRingCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpend) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinSpendSelf) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinRecv) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinStake) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ConvertZerocoinToCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromCt) |
+        TransactionFilterProxy::TYPE(TransactionRecord::ZeroCoinMintFromRingCt)
+    );
+
+    ui->comboFilter->addItem(tr("All"), TransactionFilterProxy::ALL_TYPES);
+
+    for (int i = 0 ; i < ui->comboFilter->count() ; ++i) {
+       ui->comboFilter->setItemData(i, Qt::AlignRight, Qt::TextAlignmentRole);
+    }
+
     // combo selection:
     connect(ui->comboSort,SIGNAL(currentIndexChanged(const QString&)),this,SLOT(sortTxes(const QString&)));
+    connect(ui->comboFilter,SIGNAL(currentIndexChanged(int)),this,SLOT(filterTxes(int)));
 
     this->setContentsMargins(0,0,0,0);
 
@@ -249,6 +404,10 @@ void OverviewPage::sortTxes(const QString& selectedStr){
     }
 }
 
+void OverviewPage::filterTxes(int type){
+    filter->setTypeFilter(ui->comboFilter->itemData(type).toInt());
+}
+
 void OverviewPage::handleOutOfSyncWarningClicks()
 {
     Q_EMIT outOfSyncWarningClicked();
@@ -296,7 +455,16 @@ void OverviewPage::setWalletModel(WalletModel *model)
         filter->setDynamicSortFilter(true);
         filter->setSortRole(Qt::EditRole);
         filter->setShowInactive(false);
+
+
+
         filter->sort(TransactionTableModel::Date, Qt::DescendingOrder);
+
+        // Set default filtering to show all transaction types.
+        // filter->sort(TransactionTableModel::Date, Qt::DescendingOrder);
+
+
+
 
         ui->listTransactions->setModel(filter.get());
         ui->listTransactions->setModelColumn(TransactionTableModel::ToAddress);
@@ -317,6 +485,7 @@ void OverviewPage::setWalletModel(WalletModel *model)
 
         // Keep up to date with wallet
         connect(model->getOptionsModel(), SIGNAL(displayUnitChanged(int)), this, SLOT(updateDisplayUnit()));
+        connect(model->getOptionsModel(), SIGNAL(hideOrphansChanged(bool)), this, SLOT(hideOrphans(bool)));
 
         updateWatchOnlyLabels(wallet.haveWatchOnly());
         connect(model, SIGNAL(notifyWatchonlyChanged(bool)), this, SLOT(updateWatchOnlyLabels(bool)));
@@ -324,6 +493,10 @@ void OverviewPage::setWalletModel(WalletModel *model)
 
     // update the display unit, to not use the default ("VEIL")
     updateDisplayUnit();
+
+    // Hide orphans
+    QSettings settings;
+    hideOrphans(settings.value("bHideOrphans", true).toBool());
 }
 
 void OverviewPage::updateTxesView(){
@@ -364,4 +537,36 @@ void OverviewPage::onFaqClicked(){
     mainWindow->getGUI()->showHide(true);
     SettingsFaq *dialog = new SettingsFaq(mainWindow->getGUI());
     openDialogWithOpaqueBackgroundFullScreen(dialog, mainWindow->getGUI());
+}
+
+void OverviewPage::hideOrphans(bool fHide)
+{
+    filter->setHideOrphans(fHide);
+}
+
+void OverviewPage::showEvent(QShowEvent *event){
+    QSettings settings;
+    bool fHide = settings.value("bHideOrphans", true).toBool();
+    if (fHide != filter->orphansHidden())
+        hideOrphans(fHide);
+
+    QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(this);
+    this->setGraphicsEffect(eff);
+    QPropertyAnimation *a = new QPropertyAnimation(eff,"opacity");
+    a->setDuration(100);
+    a->setStartValue(0.25);
+    a->setEndValue(1);
+    a->setEasingCurve(QEasingCurve::InBack);
+    a->start(QPropertyAnimation::DeleteWhenStopped);
+}
+
+void OverviewPage::hideEvent(QHideEvent *event){
+    QGraphicsOpacityEffect *eff = new QGraphicsOpacityEffect(this);
+    this->setGraphicsEffect(eff);
+    QPropertyAnimation *a = new QPropertyAnimation(eff,"opacity");
+    a->setDuration(100);
+    a->setStartValue(1);
+    a->setEndValue(0);
+    a->setEasingCurve(QEasingCurve::OutBack);
+    a->start(QPropertyAnimation::DeleteWhenStopped);
 }

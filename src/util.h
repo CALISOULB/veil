@@ -34,6 +34,10 @@
 #include <boost/signals2/signal.hpp>
 #include <boost/thread/condition_variable.hpp> // for boost::thread_interrupted
 
+
+// Preferences.
+const int DEFAULT_AUTOMINT_DENOM = 1000;
+
 // Application startup time (used for uptime calculation)
 int64_t GetStartupTime();
 
@@ -74,6 +78,15 @@ template<typename... Args>
 bool error(const char* fmt, const Args&... args)
 {
     LogPrintf("ERROR: %s\n", tfm::format(fmt, args...));
+    return false;
+}
+
+template<typename... Args>
+bool berror(bool log, const char* fmt, const Args&... args)
+{
+    if (log) {
+        LogPrintf("ERROR: %s\n", tfm::format(fmt, args...));
+    }
     return false;
 }
 
@@ -297,7 +310,7 @@ public:
     void ForceSetArg(const std::string& strArg, const std::string& strValue);
 
     /**
-     * Looks for -regtest, -testnet and returns the appropriate BIP70 chain name.
+     * Looks for -regtest, -testnet, or -devnet and returns the appropriate BIP70 chain name.
      * @return CBaseChainParams::MAIN by default; raises runtime error if an invalid combination is given.
      */
     std::string GetChainName() const;
